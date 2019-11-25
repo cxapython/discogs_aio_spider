@@ -90,13 +90,13 @@ class Crawler():
         '''
         index = 0
         while True:
-            xs = stream.preserve(coros)
+            xs = stream.iterate(coros)
             ys = xs[index:index + limit]
             t = await stream.list(ys)
             if not t:
                 break
             await asyncio.ensure_future(asyncio.wait(t))
-            index += limit + 1
+            index += limit
 
     async def get_proxy(self) -> Optional[str]:
         '''
