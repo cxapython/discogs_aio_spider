@@ -5,4 +5,6 @@
 # @Software: PyCharm
 CONCURRENCY_NUM = 5
 MAX_RETRY_TIMES = 3
-USE_PROXY = True
+USE_PROXY = False
+SAVE_IMG_BASE64 = False
+SAVE_IMG_FILE = False
