@@ -12,9 +12,8 @@ from collections import namedtuple
 from config.config import *
 from async_retrying import retry
 from lxml import html
-from aiostream import stream
 from copy import deepcopy
-import traceback
+
 Response = namedtuple("Response",
                       ["status", "source"])
 
@@ -24,7 +23,6 @@ try:
     asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 except ImportError:
     pass
-sem = asyncio.Semaphore(CONCURRENCY_NUM)
 
 
 class Crawler:
@@ -85,52 +83,37 @@ class Crawler:
             result = nodes
         return result
 
-    async def branch(self, coros, limit=10):
+    async def init_all(self):
         """
-        使用aiostream模块对异步生成器做一个切片操作。这里并发量为10.
-        :param coros: 是一个异步生成器函数调用之前的
-        :param limit: 并发次数
+        TODO:放到配置文件
         :return:
         """
-        if callable(coros):
-            index = 0
-            while True:
-                xs = stream.iterate(coros())
-                ys = xs[index:index + limit]
-                t = await stream.list(ys)
-                if not t:
-                    break
-                await asyncio.wait(t)
-                index += limit
-                await asyncio.sleep(0.01)
+        await self.init_session()
+        if self.rabbitmq_pool:
+            crawler.info("init rabbit_mq")
+            await self.rabbitmq_pool.init(
+                addr="127.0.0.1",
+                port="5672",
+                vhost="/",
+                username="guest",
+                password="guest",
+                max_size=10,
+            )
+        if self.mongo_pool:
+            crawler.info("init mongo")
+            self.mongo_pool(
+                host="127.0.0.1",
+                port=27017,
+                maxPoolSize=20,
+                minPoolSize=5
+            )
 
-    async def start(self):
-        try:
-            await self.init_session()
-            tasks = self.create_task_gen
-            await self.branch(tasks)
-        except asyncio.CancelledError as e:
-            crawler.error("CancelledError")
-        except Exception as e:
-            crawler.error(f"else error:{traceback.format_exc()}")
-        finally:
-            await self.close_session()
-
-    # async def get_proxy(self) -> Optional[str]:
-    #     """
-    #     获取代理
-    #     """
-    #     while True:
-    #         proxy = await proxy_helper.get_proxy(isown=1, protocol=2, site='dianping')
-    #         if proxy:
-    #             host = proxy[0].get('ip')
-    #             port = proxy[0].get('port')
-    #             ip = f"http://{host}:{port}"
-    #             return ip
-    #         else:
-    #             crawler.info("代理超时开始等待")
-    #
-    #             await asyncio.sleep(5)
+    async def get_proxy(self):
+        """
+        代理部分
+        :return:
+        """
+        pass
 
     async def init_session(self):
         """
@@ -139,7 +122,6 @@ class Crawler:
         :return:
         """
         crawler.info("init session")
-
         self.tc = aiohttp.connector.TCPConnector(limit=300, force_close=True,
                                                  enable_cleanup_closed=True,
                                                  verify_ssl=False)

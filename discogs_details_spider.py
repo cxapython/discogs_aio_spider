@@ -6,7 +6,6 @@
 import asyncio
 from async_retrying import retry
 import aiofiles
-from db.mongohelper import MotorOperation
 from loguru import logger as  crawler
 from loguru import logger as  storage
 import datetime
@@ -14,12 +13,14 @@ import base64
 from copy import copy
 import os
 from common.base_crawler import Crawler
-from types import AsyncGeneratorType
-from decorators.decorators import decorator
+import traceback
 from urllib.parse import urljoin
 from multidict import CIMultiDict
 from itertools import islice
 from config.config import SAVE_IMG_BASE64, SAVE_IMG_FILE
+from util import RabbitMqPool, MongoPool,decorator,MotorOperation
+import msgpack
+from urllib.parse import urljoin
 
 DEFAULT_HEADERS = CIMultiDict({
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
@@ -33,32 +34,40 @@ BASE_URL = "https://www.discogs.com"
 
 
 class DetailsSpider(Crawler):
+
     def __init__(self):
+        self.db_name = "aio_spider_data"
         self.page_pat = "&page=.*&"
+        self.rabbitmq_pool = RabbitMqPool()
+        self.mongo_pool = MongoPool
 
-    async def create_task_gen(self):
-        data: AsyncGeneratorType = MotorOperation().find_data(col="discogs_index_data")
-        async for item in data:
-            yield asyncio.ensure_future(self.fetch_detail_page(item))
+    async def start(self):
+        try:
+            await self.init_all()
+            await self.rabbitmq_pool.subscribe("discogs_index_spider", self.fetch_detail_page)
+        except asyncio.CancelledError as e:
+            crawler.error("CancelledError")
+        except Exception as e:
+            crawler.error(f"else error:{traceback.format_exc()}")
+        finally:
+            await self.close_session()
 
-    async def fetch_detail_page(self, item: dict):
+    async def fetch_detail_page(self, msg: str):
         """
         访问详情页，开始解析
-        :param item:
+        :param msg:队列消息，包括info和body
         :return:
         """
-        detail_url = item.get("detail_url")
+        url = msgpack.unpackb(msg.body, raw=False).get("url")
+        detail_url = urljoin(BASE_URL, url)
         kwargs = {"headers": DEFAULT_HEADERS}
-        # 修改种子URL的状态为1表示开始爬取。
-        condition = {'detail_url': detail_url}
-        await MotorOperation().change_status(condition, col="discogs_index_data", status_code=1)
         response = await self.get_session(detail_url, kwargs)
         if response.status == 200:
             source = response.source
             if SAVE_IMG_FILE:
                 await self.more_images(source)
             try:
-                await self.get_list_info(item, detail_url, source)
+                await self.get_list_info(detail_url, source)
             except Exception as e:
                 crawler.info(f"解析出错:{detail_url}")
 
@@ -73,15 +82,13 @@ class DetailsSpider(Crawler):
         base64_data = f"data:image/jpg;base64,{base64.b64encode(res.source).decode('utf-8')}"
         return base64_data
 
-    async def get_list_info(self, data_item, url, source):
+    async def get_list_info(self, url, source):
         """
         为了取得元素的正确性，这里按照块进行处理。
-        :param data_item:
         :param url: 当前页的url
         :param source: 源码
         :return:
         """
-
         cover_xpath = "//meta[@property='og:image']"
         track_div_xpath = "//div[@id='page_content']//table//tr"
         cover_url_list = self.xpath(source, cover_xpath, "content")
@@ -90,7 +97,6 @@ class DetailsSpider(Crawler):
             base64url = await self.url2base64(cover_url)
         div_node_list = self.xpath(source, track_div_xpath)
         title_list = list()
-        save_dic = dict()
         for index, item in enumerate(div_node_list, 1):
             try:
                 artist_node = self.xpath(item, ".//td[@class='tracklist_track_pos']", "text")
@@ -99,7 +105,6 @@ class DetailsSpider(Crawler):
                     title = title_node[0]
                 else:
                     break
-                title = f"{data_item.get('artist')}-{title}"
                 if artist_node:
                     artist = artist_node[0]
                     title = f"{artist}-{title}"
@@ -108,17 +113,17 @@ class DetailsSpider(Crawler):
             except Exception as e:
                 crawler.warning(f"{e.args}")
 
-        save_dic.update(data_item)
+        save_dic = dict()
+
+        save_dic["obj_id"] = url.split('/')[-1]
         save_dic["cover_url"] = cover_url
         if SAVE_IMG_BASE64:
             save_dic["base64url"] = base64url
         save_dic["title_list"] = title_list
         save_dic["crawler_time"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        save_dic.pop("status")
-        await MotorOperation().save_data(save_dic, col="discogs_details_data", key="detail_url")
-        # 修改种子URL的状态为2表示爬取成功。
-        condition = {"detail_url": url}
-        await MotorOperation().change_status(condition, col="discogs_index_data", status_code=2)
+        # 根据obj_id更新
+        await MotorOperation().save_data(self.mongo_pool, save_dic,
+                                         col="discogs_details_data", key="obj_id")
 
     @decorator()
     async def more_images(self, source):

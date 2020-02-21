@@ -5,17 +5,18 @@
 # @Software: PyCharm
 # 2000-2009
 import asyncio
-from db.mongohelper import MotorOperation
+
+import msgpack
+
+from util import MotorOperation
 from loguru import logger as  crawler
-from collections import namedtuple, deque
+from collections import namedtuple
 import datetime
 from common.base_crawler import Crawler
-from types import AsyncGeneratorType
-from decorators.decorators import decorator
 import re
 import math
 from urllib.parse import urljoin
-from typing import Mapping, Dict
+from util import RabbitMqPool, MongoPool
 import sys
 import traceback
 
@@ -41,31 +42,46 @@ DEFAULT_HEADRS = {
 
 class IndexSpider(Crawler):
     def __init__(self):
+        self.db_name = "aio_spider_data"
         self.page_pat = "&page=.*&"
+        self.rabbitmq_pool = RabbitMqPool()
+        self.mongo_pool = MongoPool
 
-    async def create_task_gen(self):
-        data: AsyncGeneratorType = MotorOperation().find_data()
-        async for item in data:
-            yield asyncio.ensure_future(self.fetch_index_page(item))
+    async def start(self):
+        try:
+            await self.init_all()
+            await self.rabbitmq_pool.subscribe("discogs_seed_spider", self.fetch_index_page)
+        except asyncio.CancelledError as e:
+            crawler.error("CancelledError")
+        except Exception as e:
+            crawler.error(f"else error:{traceback.format_exc()}")
+        finally:
+            await self.close_session()
 
-    async def fetch_index_page(self, item: Dict[str, str]):
+    async def fetch_index_page(self, msg):
         """
         访问列表，并开始解析
         :param item:
         :return:
         """
-        url = item.get("url")
+        item = msgpack.unpackb(msg.body, raw=False)
+        country = item["country"]
+        _format = item["format"]
+        year = item["year"]
+        style = item["style"]
+        url = (f"https://www.discogs.com/search/?layout=sm&country_exact={country}&"
+               f"format_exact={_format}&limit=100&year={year}&style_exact={style}&page=1&decade=2000")
         kwargs = {"headers": DEFAULT_HEADRS, "timeout": 15}
         # 修改种子URL的状态为1表示开始爬取。
-        condition = {'url': url}
-        await MotorOperation().change_status(condition, status_code=1)
         response = await self.get_session(url, kwargs)
         if response.status == 200:
             source = response.source
             # 获取当前的链接然后构建所有页数的url。
             # 保存当一页的内容。
-            no_more = await self.get_list_info(url, source)
-            if no_more:
+            have_more = await self.get_list_info(url, source)
+            # 成功完成任务
+            await msg.ack()
+            if have_more:
                 await self.max_page_index(url, source)
             else:
                 crawler.info(f"该分类没有更多内容:{url}")
@@ -77,21 +93,20 @@ class IndexSpider(Crawler):
         :param source: 源码
         :return:
         """
-        no_more = False
+        have_more = False
         div_xpath = "//div[@class='cards cards_layout_text-only']/div"
         div_node_list = self.xpath(source, div_xpath)
-        tasks = list()
-        t_append = tasks.append
+        task = []
         for div_node in div_node_list:
             try:
                 dic = dict()
                 dic["obj_id"] = self.xpath(div_node, "@data-object-id")[0]
                 dic["artist"] = self.xpath(div_node, ".//div[@class='card_body']/h4/span/a", "text")[0]
-                # dic["artist"] = self.xpath(div_node, ".//div[@class='card_body']/h4/span", "text")[0]
                 dic["title"] = \
                     self.xpath(div_node, ".//div[@class='card_body']/h4/a[@class='search_result_title ']", "text")[0]
                 _detail_url = \
                     self.xpath(div_node, ".//div[@class='card_body']/h4/a[@class='search_result_title ']", "href")[0]
+
                 dic["detail_url"] = urljoin(BASE_URL, _detail_url)
 
                 card_info_xpath = ".//div[@class='card_body']/p[@class='card_info']"
@@ -104,23 +119,24 @@ class IndexSpider(Crawler):
                     0]
                 dic["url"] = url
                 dic["page_index"] = 1
-                dic["status"] = 0
                 dic["crawler_time"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                t_append(dic)
+                task.append(dic)
+                """
+                https://www.discogs.com/Mary-Griffin-Perfect-Moment/master/98792
+                https://www.discogs.com+作者+歌名+master+obj_id 
+                """
+                await self.rabbitmq_pool.publish("discogs_index_spider",
+                                                 {"url": _detail_url})
+
+
             except IndexError as e:
                 # https://www.discogs.com/search/?layout=sm&country_exact=Unknown&format_exact=Cassette&limit=100&year=2000&style_exact=House&page=1&decade=2000
                 crawler.error(f"解析出错，此时的url是:{url}")
-        condition = {"url": url}
-        status_code = 2
-        if tasks:
-            no_more = True
-            await MotorOperation().save_data(tasks)
-        else:
-            status_code = 4
-        await MotorOperation().change_status(condition, status_code=status_code)
-        return no_more
+        if task:
+            have_more = True
+            await MotorOperation().save_data(self.mongo_pool, task)
+        return have_more
 
-    @decorator(False)
     async def max_page_index(self, url, source):
         """
         :param url:
@@ -131,13 +147,10 @@ class IndexSpider(Crawler):
         if total_page_node:
             total_page = total_page_node[0].split("of")[-1].strip().replace(",", "")
             _max_page_index = math.ceil(int(total_page) / 100)
-            new_url_list = deque()
-            n_append = new_url_list.append
             if _max_page_index > 1:
                 for i in range(2, _max_page_index + 1):
                     new_url = re.sub(self.page_pat, f"&page={i}&", url)
-                    n_append(new_url)
-                await MotorOperation().save_data_with_status(new_url_list)
+                    print(new_url)
 
 
 if __name__ == '__main__':

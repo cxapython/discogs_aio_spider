@@ -5,15 +5,13 @@
 # @Software: PyCharm
 # 2000-2009
 import asyncio
-from db.mongohelper import MotorOperation
 from collections import namedtuple
 from common.base_crawler import Crawler
-from decorators.decorators import decorator
-import re
 from collections import deque
 from itertools import product
 from loguru import logger
 import sys
+from util import RabbitMqPool
 
 Response = namedtuple("Response",
                       ["status", "text"])
@@ -38,10 +36,23 @@ DEFAULT_HEADERS = {
 
 
 class SeedSpider(Crawler):
+    def __init__(self, db_name="aio_spider_data"):
+        self.rabbitmq_pool = RabbitMqPool()
+
+    async def init_all(self):
+        await self.init_session()
+        await self.rabbitmq_pool.init(
+            addr="127.0.0.1",
+            port="5672",
+            vhost="/",
+            username="guest",
+            password="guest",
+            max_size=10,
+        )
 
     async def start(self):
         try:
-            await self.init_session()
+            await self.init_all()
             res_list: list = [asyncio.ensure_future(self.fetch_home(url)) for url in START_URL_LIST]
             tasks = asyncio.wait(res_list)
             await tasks
@@ -103,18 +114,19 @@ class SeedSpider(Crawler):
                     type_dic[k].setdefault("name", deque()).append(name)
                     type_dic[k].setdefault("count", deque()).append(count)
 
-        tasks = deque()
-        t_append = tasks.append
         for item in product([2000, 2001, 2002, 2003], style_dic["url_name"], format_dic["url_name"],
                             country_dic["url_name"]):
+            data = dict()
             country = item[3]
             _format = item[2]
             year = item[0]
             style = item[1]
-            url = (f"https://www.discogs.com/search/?layout=sm&country_exact={country}&"
-                   f"format_exact={_format}&limit=100&year={year}&style_exact={style}&page=1&decade=2000")
-            t_append(url)
-        await MotorOperation().save_data_with_status(tasks)
+            data["country"] = country
+            data["format"] = _format
+            data["year"] = year
+            data["style"] = style
+            data["page"] = 1
+            await self.rabbitmq_pool.publish("discogs_seed_spider", data)
 
 
 if __name__ == '__main__':
