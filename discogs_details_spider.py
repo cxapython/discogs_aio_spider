@@ -14,11 +14,11 @@ from copy import copy
 import os
 from common.base_crawler import Crawler
 import traceback
-from urllib.parse import urljoin
+import sys
 from multidict import CIMultiDict
 from itertools import islice
-from config.config import SAVE_IMG_BASE64, SAVE_IMG_FILE
-from util import RabbitMqPool, MongoPool,decorator,MotorOperation
+from config import Config
+from util import RabbitMqPool, MongoPool, decorator, MotorOperation
 import msgpack
 from urllib.parse import urljoin
 
@@ -30,7 +30,6 @@ DEFAULT_HEADERS = CIMultiDict({
     "User-Agent": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_2) "
                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/72.0.3626.121 Safari/537.36"),
 })
-BASE_URL = "https://www.discogs.com"
 
 
 class DetailsSpider(Crawler):
@@ -40,6 +39,10 @@ class DetailsSpider(Crawler):
         self.page_pat = "&page=.*&"
         self.rabbitmq_pool = RabbitMqPool()
         self.mongo_pool = MongoPool
+        self.config = Config()
+        self.spider_config = self.config.get("spider")
+        self.mongo_config = self.config.get("mongo")
+        self.rabbitmq_config = self.config.get("rabbitmq")
 
     async def start(self):
         try:
@@ -59,12 +62,12 @@ class DetailsSpider(Crawler):
         :return:
         """
         url = msgpack.unpackb(msg.body, raw=False).get("url")
-        detail_url = urljoin(BASE_URL, url)
+        detail_url = urljoin(self.spider_config["BASE_URL"], url)
         kwargs = {"headers": DEFAULT_HEADERS}
         response = await self.get_session(detail_url, kwargs)
         if response.status == 200:
             source = response.source
-            if SAVE_IMG_FILE:
+            if self.spider_config["SAVE_IMG_FILE"]:
                 await self.more_images(source)
             try:
                 await self.get_list_info(detail_url, source)
@@ -93,7 +96,7 @@ class DetailsSpider(Crawler):
         track_div_xpath = "//div[@id='page_content']//table//tr"
         cover_url_list = self.xpath(source, cover_xpath, "content")
         cover_url = cover_url_list[0]
-        if SAVE_IMG_BASE64:
+        if self.spider_config["SAVE_IMG_BASE64"]:
             base64url = await self.url2base64(cover_url)
         div_node_list = self.xpath(source, track_div_xpath)
         title_list = list()
@@ -117,7 +120,7 @@ class DetailsSpider(Crawler):
 
         save_dic["obj_id"] = url.split('/')[-1]
         save_dic["cover_url"] = cover_url
-        if SAVE_IMG_BASE64:
+        if self.spider_config["SAVE_IMG_BASE64"]:
             save_dic["base64url"] = base64url
         save_dic["title_list"] = title_list
         save_dic["crawler_time"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -136,7 +139,7 @@ class DetailsSpider(Crawler):
                                    "href")
         if more_url_node:
             _url = islice(more_url_node, 0)
-            more_url = urljoin(BASE_URL, _url)
+            more_url = urljoin(self.spider_config["BASE_URL"], _url)
             kwargs = {"headers": DEFAULT_HEADERS}
             response = await self.get_session(more_url, kwargs)
             if response.status == 200:
@@ -178,8 +181,12 @@ class DetailsSpider(Crawler):
 
 if __name__ == '__main__':
     s = DetailsSpider()
-    loop = asyncio.get_event_loop()
-    try:
-        loop.run_until_complete(s.start())
-    finally:
-        loop.close()
+    python_version = sys.version_info
+    if python_version >= (3, 7):
+        asyncio.run(s.start())
+    else:
+        loop = asyncio.get_event_loop()
+        try:
+            loop.run_until_complete(s.start())
+        finally:
+            loop.close()

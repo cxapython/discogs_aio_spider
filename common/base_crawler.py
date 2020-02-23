@@ -9,7 +9,7 @@ import aiohttp
 from loguru import logger as crawler
 import async_timeout
 from collections import namedtuple
-from config.config import *
+from config import Config
 from async_retrying import retry
 from lxml import html
 from copy import deepcopy
@@ -31,7 +31,7 @@ class Crawler:
         self.session = None
         self.session_flag = False
 
-    @retry(attempts=MAX_RETRY_TIMES)
+    @retry(attempts=3)
     async def get_session(self, url, _kwargs=None, source_type="text", status_code=200) -> Response:
         """
 
@@ -44,7 +44,7 @@ class Crawler:
         if _kwargs is None:
             _kwargs = dict()
         kwargs = deepcopy(_kwargs)
-        if USE_PROXY:
+        if self.spider_config.get("USE_PROXY"):
             kwargs["proxy"] = await self.get_proxy()
         method = kwargs.pop("method", "get")
         timeout = kwargs.pop("timeout", 5)
@@ -92,20 +92,21 @@ class Crawler:
         if self.rabbitmq_pool:
             crawler.info("init rabbit_mq")
             await self.rabbitmq_pool.init(
-                addr="127.0.0.1",
-                port="5672",
-                vhost="/",
-                username="guest",
-                password="guest",
-                max_size=10,
+                addr=self.rabbitmq_config["addr"],
+                port=self.rabbitmq_config["port"],
+                vhost=self.rabbitmq_config["vhost"],
+                username=self.rabbitmq_config["username"],
+                password=self.rabbitmq_config["password"],
+                max_size=self.rabbitmq_config["max_size"],
             )
         if self.mongo_pool:
             crawler.info("init mongo")
+
             self.mongo_pool(
-                host="127.0.0.1",
-                port=27017,
-                maxPoolSize=20,
-                minPoolSize=5
+                host=self.mongo_config["host"],
+                port=self.mongo_config["port"],
+                maxPoolSize=self.mongo_config["max_pool_size"],
+                minPoolSize=self.mongo_config["min_pool_size"]
             )
 
     async def get_proxy(self):

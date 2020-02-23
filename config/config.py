@@ -3,8 +3,26 @@
 # @Author : cxa
 # @File : config.py.py
 # @Software: PyCharm
-CONCURRENCY_NUM = 5
-MAX_RETRY_TIMES = 3
-USE_PROXY = False
-SAVE_IMG_BASE64 = False
-SAVE_IMG_FILE = False
+import toml
+from loguru import logger
+import traceback
+import os
+
+_temp = os.path.dirname(os.path.abspath(__file__))
+
+toml_file = os.path.join(_temp, "config.toml")
+
+
+def config():
+    data = ""
+    try:
+        with open(toml_file, mode="r", encoding="utf-8") as fs:
+            data = toml.load(fs)
+    except Exception as e:
+        logger.error(f"读取配置错误！:{traceback.format_exc()}")
+
+    return data
+
+
+if __name__ == '__main__':
+    print(config())

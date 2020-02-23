@@ -17,6 +17,7 @@ import re
 import math
 from urllib.parse import urljoin
 from util import RabbitMqPool, MongoPool
+from config import Config
 import sys
 import traceback
 
@@ -46,6 +47,10 @@ class IndexSpider(Crawler):
         self.page_pat = "&page=.*&"
         self.rabbitmq_pool = RabbitMqPool()
         self.mongo_pool = MongoPool
+        self.config = Config()
+        self.spider_config = self.config.get("spider")
+        self.mongo_config = self.config.get("mongo")
+        self.rabbitmq_config = self.config.get("rabbitmq")
 
     async def start(self):
         try:
@@ -150,7 +155,18 @@ class IndexSpider(Crawler):
             if _max_page_index > 1:
                 for i in range(2, _max_page_index + 1):
                     new_url = re.sub(self.page_pat, f"&page={i}&", url)
-                    print(new_url)
+                    country = re.findall("country_exact=(.*?)&", new_url)[0]
+                    _format = re.findall("format_exact=(.*?)&", new_url)[0]
+                    year = re.findall("year=(.*?)&", new_url)[0]
+                    style = re.findall("style_exact=(.*?)&", new_url)[0]
+                    page = re.findall("page=(.*?)&", new_url)[0]
+                    data = dict()
+                    data["country"] = country
+                    data["format"] = _format
+                    data["year"] = year
+                    data["style"] = style
+                    data["page"] = page
+                    await self.rabbitmq_pool.publish("discogs_seed_spider", data)
 
 
 if __name__ == '__main__':

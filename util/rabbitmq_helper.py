@@ -11,7 +11,7 @@ from logging import getLogger, WARNING
 from aio_pika import connect_robust, Channel, pool, IncomingMessage, Message
 
 from util.singleton import Singleton
-from util import decorator
+from util.decorators import decorator
 import msgpack
 
 

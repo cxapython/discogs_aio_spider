@@ -1,0 +1,24 @@
+[tool.poetry]
+name = "discogs_aio_spider"
+version = "0.1.0"
+description = "基于Asyncio+Aiohttp+Motor的国外黑胶唱片信息网站Discogs内容的抓取"
+authors = ["cxapython <1598828268@qq.com>"]
+
+[tool.poetry.dependencies]
+python = "^3.8"
+aiohttp = "^3.6.2"
+loguru = "^0.4.1"
+motor = "^2.1.0"
+aio-pika = "^6.5.2"
+async_retrying = "^0.2.2"
+uvloop = "^0.14.0"
+toml = "^0.10.0"
+lxml = "^4.5.0"
+msgpack = "^1.0.0"
+aiofiles = "^0.4.0"
+
+[tool.poetry.dev-dependencies]
+
+[build-system]
+requires = ["poetry>=0.12"]
+build-backend = "poetry.masonry.api"

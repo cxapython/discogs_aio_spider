@@ -12,7 +12,7 @@ from itertools import product
 from loguru import logger
 import sys
 from util import RabbitMqPool
-
+from config import Config
 Response = namedtuple("Response",
                       ["status", "text"])
 try:
@@ -38,6 +38,10 @@ DEFAULT_HEADERS = {
 class SeedSpider(Crawler):
     def __init__(self, db_name="aio_spider_data"):
         self.rabbitmq_pool = RabbitMqPool()
+        self.config = Config()
+        self.spider_config = self.config.get("spider")
+        self.mongo_config = self.config.get("mongo")
+        self.rabbitmq_config = self.config.get("rabbitmq")
 
     async def init_all(self):
         await self.init_session()

@@ -3,3 +3,6 @@
 # @Author : cxa
 # @File : __init__.py.py
 # @Software: PyCharm
+from config.config import config as Config
+
+__all__ = ["Config"]
