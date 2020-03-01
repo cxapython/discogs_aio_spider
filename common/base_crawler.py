@@ -14,12 +14,14 @@ from util import RabbitMqPool, MongoPool
 from config import MongoConfig, RabbitmqConfig, SpiderConfig
 from functools import wraps
 import traceback
-import contextvars
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Dict, Any, Union, List, Callable
 from copy import deepcopy
+from contextvars import ContextVar
 
-run_flag = contextvars.ContextVar('which function will run in decorator')
+Node = List[str]
+run_flag: ContextVar = ContextVar('which function will run in decorator')
+
 run_flag.set(False)
 
 try:
@@ -50,7 +52,9 @@ class Crawler:
         self.rabbitmq_config = RabbitmqConfig
 
     @retry(attempts=3)
-    async def get_session(self, url, _kwargs=None, source_type="text", status_code=200) -> Response:
+    async def get_session(self, url: str, _kwargs: Optional[Dict[str, Any]] = None,
+                          source_type: str = "text",
+                          status_code: int = 200) -> Response:
         """
 
         :param url:
@@ -80,9 +84,17 @@ class Crawler:
         return res
 
     @staticmethod
-    def xpath(_response, rule, _attr=None):
+    def xpath(_response: Union[Response, str],
+              rule: str, _attr: Optional[str] = None) -> Node:
+        """
+
+        :param _response: response object or text
+        :param rule: xpath rule
+        :param _attr: attr
+        :return:
+        """
         if isinstance(_response, Response):
-            source = _response.text
+            source = _response.source
             root = html.fromstring(source)
 
         elif isinstance(_response, str):
@@ -100,7 +112,8 @@ class Crawler:
             result = nodes
         return result
 
-    async def fetch_start(self, callback, queue_name="discogs_seed_spider"):
+    async def fetch_start(self, callback: Callable,
+                          queue_name: str = "discogs_seed_spider") -> None:
         try:
             run_flag.set(True)
             await self.init_all()
@@ -112,7 +125,7 @@ class Crawler:
         finally:
             await self.close_session()
 
-    async def init_all(self):
+    async def init_all(self) -> None:
         """
         :return:
         """
