@@ -44,9 +44,6 @@ class MotorOperation:
     def __init__(self, loop=None):
         self.__dict__.update(**db_configs)
         self.loop = loop or asyncio.get_event_loop()
-        if sys.platform != "win32":
-            watcher = asyncio.get_child_watcher()
-            watcher.attach_loop(self.loop)
 
     def client(self):
         if self.user:
@@ -58,8 +55,8 @@ class MotorOperation:
 
     def get_db(self):
         db_name = self.db_name
-        if asyncio.get_running_loop() != self.loop:
-            self = MotorOperation()
+        # if asyncio.get_running_loop() != self.loop:
+        #     self = MotorOperation()
         if db_name not in self._db:
             self._db[db_name] = self.client()[db_name]
         return self._db[db_name]
