@@ -74,7 +74,7 @@ class SeedSpider(Crawler):
             source = response.source
             await self.parse(source)
 
-    async def parse(self, source):
+    async def parse(self, source:str):
         """
         # ul分四块处理, 风格，唱片类型，国家。
         # 分块处理

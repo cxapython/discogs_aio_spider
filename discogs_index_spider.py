@@ -73,7 +73,7 @@ class IndexSpider(Crawler):
             else:
                 crawler.info(f"该分类没有更多内容:{url}")
 
-    async def get_list_info(self, url, source):
+    async def get_list_info(self, url:str, source:str):
         """
         为了取得元素的正确性，这里按照块进行处理。
         :param url: 当前页的url
@@ -124,7 +124,7 @@ class IndexSpider(Crawler):
             await MotorOperation().save_data(self.mongo_pool, task)
         return have_more
 
-    async def max_page_index(self, url, source):
+    async def max_page_index(self, url:str, source:str):
         """
         :param url:
         :param source:
