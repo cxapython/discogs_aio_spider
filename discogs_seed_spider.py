@@ -11,8 +11,7 @@ from collections import deque
 from itertools import product
 from loguru import logger
 import sys
-from util import RabbitMqPool
-from config import Config
+
 Response = namedtuple("Response",
                       ["status", "text"])
 try:
@@ -36,12 +35,8 @@ DEFAULT_HEADERS = {
 
 
 class SeedSpider(Crawler):
-    def __init__(self, db_name="aio_spider_data"):
-        self.rabbitmq_pool = RabbitMqPool()
-        self.config = Config()
-        self.spider_config = self.config.get("spider")
-        self.mongo_config = self.config.get("mongo")
-        self.rabbitmq_config = self.config.get("rabbitmq")
+    def __init__(self):
+        super().__init__()
 
     async def init_all(self):
         await self.init_session()
@@ -74,7 +69,7 @@ class SeedSpider(Crawler):
         :return:
         """
         kwargs = {"headers": DEFAULT_HEADERS}
-        response = await self.get_session(url, kwargs)
+        response = await self.get_session(url, _kwargs=kwargs)
         if response.status == 200:
             source = response.source
             await self.parse(source)

@@ -60,6 +60,7 @@ class RabbitMqPool(Singleton):
             async with queue.iterator() as queue_iter:
                 async for message in queue_iter:
                     await callback(message)
+
                     # 完成任务，已经加到每个爬虫文件
                     # await message.ack()
 

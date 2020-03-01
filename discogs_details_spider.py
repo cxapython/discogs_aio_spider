@@ -13,12 +13,10 @@ import base64
 from copy import copy
 import os
 from common.base_crawler import Crawler
-import traceback
 import sys
 from multidict import CIMultiDict
 from itertools import islice
-from config import Config
-from util import RabbitMqPool, MongoPool, decorator, MotorOperation
+from util import decorator, MotorOperation
 import msgpack
 from urllib.parse import urljoin
 
@@ -37,24 +35,9 @@ class DetailsSpider(Crawler):
     def __init__(self):
         self.db_name = "aio_spider_data"
         self.page_pat = "&page=.*&"
-        self.rabbitmq_pool = RabbitMqPool()
-        self.mongo_pool = MongoPool
-        self.config = Config()
-        self.spider_config = self.config.get("spider")
-        self.mongo_config = self.config.get("mongo")
-        self.rabbitmq_config = self.config.get("rabbitmq")
+        super().__init__()
 
-    async def start(self):
-        try:
-            await self.init_all()
-            await self.rabbitmq_pool.subscribe("discogs_index_spider", self.fetch_detail_page)
-        except asyncio.CancelledError as e:
-            crawler.error("CancelledError")
-        except Exception as e:
-            crawler.error(f"else error:{traceback.format_exc()}")
-        finally:
-            await self.close_session()
-
+    @Crawler.start(queue_name="discogs_index_spider")
     async def fetch_detail_page(self, msg: str):
         """
         访问详情页，开始解析
@@ -64,13 +47,14 @@ class DetailsSpider(Crawler):
         url = msgpack.unpackb(msg.body, raw=False).get("url")
         detail_url = urljoin(self.spider_config["BASE_URL"], url)
         kwargs = {"headers": DEFAULT_HEADERS}
-        response = await self.get_session(detail_url, kwargs)
+        response = await self.get_session(detail_url, _kwargs=kwargs)
         if response.status == 200:
             source = response.source
             if self.spider_config["SAVE_IMG_FILE"]:
                 await self.more_images(source)
             try:
                 await self.get_list_info(detail_url, source)
+                await msg.ack()
             except Exception as e:
                 crawler.info(f"解析出错:{detail_url}")
 
@@ -141,7 +125,7 @@ class DetailsSpider(Crawler):
             _url = islice(more_url_node, 0)
             more_url = urljoin(self.spider_config["BASE_URL"], _url)
             kwargs = {"headers": DEFAULT_HEADERS}
-            response = await self.get_session(more_url, kwargs)
+            response = await self.get_session(more_url, _kwargs=kwargs)
             if response.status == 200:
                 source = response.source
                 await self.parse_images(source)
@@ -150,7 +134,7 @@ class DetailsSpider(Crawler):
         img_headers = copy(DEFAULT_HEADERS)
         img_headers["host"] = "img.discogs.com"
         kwargs = {"headers": img_headers}
-        response = await self.get_session(img_url, kwargs, source_type="buff")
+        response = await self.get_session(img_url, _kwargs=kwargs, source_type="buff")
         buff = response.source
         await self.save_image(img_url, buff)
 
@@ -183,10 +167,10 @@ if __name__ == '__main__':
     s = DetailsSpider()
     python_version = sys.version_info
     if python_version >= (3, 7):
-        asyncio.run(s.start())
+        asyncio.run(s.fetch_detail_page())
     else:
         loop = asyncio.get_event_loop()
         try:
-            loop.run_until_complete(s.start())
+            loop.run_until_complete(s.fetch_detail_page())
         finally:
             loop.close()

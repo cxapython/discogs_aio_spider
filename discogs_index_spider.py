@@ -15,11 +15,9 @@ import datetime
 from common.base_crawler import Crawler
 import re
 import math
+from multidict import CIMultiDict
 from urllib.parse import urljoin
-from util import RabbitMqPool, MongoPool
-from config import Config
 import sys
-import traceback
 
 Response = namedtuple("Response",
                       ["status", "text"])
@@ -31,38 +29,22 @@ except ImportError:
     pass
 BASE_URL = "https://www.discogs.com"
 # 最终形式
-DEFAULT_HEADRS = {
+DEFAULT_HEADERS = CIMultiDict({
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
     "Accept-Encoding": "gzip, deflate, br",
     "Accept-Language": "zh-CN,zh;q=0.9",
     "Host": "www.discogs.com",
-    "User-Agent": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_2)" \
-                   " AppleWebKit/537.36 (KHTML, like Gecko) Chrome/72.0.3626.121 Safari/537.36"),
-}
+    "User-Agent": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_2) "
+                   "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/72.0.3626.121 Safari/537.36"),
+})
 
 
 class IndexSpider(Crawler):
     def __init__(self):
-        self.db_name = "aio_spider_data"
+        super().__init__()
         self.page_pat = "&page=.*&"
-        self.rabbitmq_pool = RabbitMqPool()
-        self.mongo_pool = MongoPool
-        self.config = Config()
-        self.spider_config = self.config.get("spider")
-        self.mongo_config = self.config.get("mongo")
-        self.rabbitmq_config = self.config.get("rabbitmq")
 
-    async def start(self):
-        try:
-            await self.init_all()
-            await self.rabbitmq_pool.subscribe("discogs_seed_spider", self.fetch_index_page)
-        except asyncio.CancelledError as e:
-            crawler.error("CancelledError")
-        except Exception as e:
-            crawler.error(f"else error:{traceback.format_exc()}")
-        finally:
-            await self.close_session()
-
+    @Crawler.start(queue_name="discogs_seed_spider")
     async def fetch_index_page(self, msg):
         """
         访问列表，并开始解析
@@ -76,9 +58,9 @@ class IndexSpider(Crawler):
         style = item["style"]
         url = (f"https://www.discogs.com/search/?layout=sm&country_exact={country}&"
                f"format_exact={_format}&limit=100&year={year}&style_exact={style}&page=1&decade=2000")
-        kwargs = {"headers": DEFAULT_HEADRS, "timeout": 15}
+        kwargs = {"headers": DEFAULT_HEADERS, "timeout": 15}
         # 修改种子URL的状态为1表示开始爬取。
-        response = await self.get_session(url, kwargs)
+        response = await self.get_session(url, _kwargs=kwargs)
         if response.status == 200:
             source = response.source
             # 获取当前的链接然后构建所有页数的url。
@@ -173,10 +155,10 @@ if __name__ == '__main__':
     python_version = sys.version_info
     s = IndexSpider()
     if python_version >= (3, 7):
-        asyncio.run(s.start())
+        asyncio.run(s.fetch_index_page())
     else:
         loop = asyncio.get_event_loop()
         try:
-            loop.run_until_complete(s.start())
+            loop.run_until_complete(s.fetch_index_page())
         finally:
             loop.close()

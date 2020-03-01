@@ -8,14 +8,19 @@ import asyncio
 import aiohttp
 from loguru import logger as crawler
 import async_timeout
-from collections import namedtuple
-from config import Config
 from async_retrying import retry
 from lxml import html
+from util import RabbitMqPool, MongoPool
+from config import MongoConfig, RabbitmqConfig, SpiderConfig
+from functools import wraps
+import traceback
+import contextvars
+from dataclasses import dataclass
+from typing import Optional
 from copy import deepcopy
 
-Response = namedtuple("Response",
-                      ["status", "source"])
+run_flag = contextvars.ContextVar('which function will run in decorator')
+run_flag.set(False)
 
 try:
     import uvloop
@@ -25,11 +30,24 @@ except ImportError:
     pass
 
 
+@dataclass
+class Response:
+    status: int
+    source: str
+
+
+@dataclass
 class Crawler:
-    def __init__(self):
-        self.tc = None
-        self.session = None
-        self.session_flag = False
+    tc: Optional[aiohttp.BaseConnector] = None
+    session: Optional[aiohttp.ClientSession] = None
+    session_flag: bool = False
+
+    def __post_init__(self):
+        self.rabbitmq_pool = RabbitMqPool()
+        self.spider_config = SpiderConfig
+        self.mongo_config = MongoConfig
+        self.mongo_pool = MongoPool
+        self.rabbitmq_config = RabbitmqConfig
 
     @retry(attempts=3)
     async def get_session(self, url, _kwargs=None, source_type="text", status_code=200) -> Response:
@@ -73,7 +91,6 @@ class Crawler:
         else:
             root = _response
         nodes = root.xpath(rule)
-        result = list()
         if _attr:
             if _attr == "text":
                 result = [entry.text for entry in nodes]
@@ -83,9 +100,20 @@ class Crawler:
             result = nodes
         return result
 
+    async def fetch_start(self, callback, queue_name="discogs_seed_spider"):
+        try:
+            run_flag.set(True)
+            await self.init_all()
+            await self.rabbitmq_pool.subscribe(queue_name, eval(f"self.{callback.__name__}"))
+        except asyncio.CancelledError as e:
+            crawler.error("CancelledError")
+        except Exception as e:
+            crawler.error(f"else error:{traceback.format_exc()}")
+        finally:
+            await self.close_session()
+
     async def init_all(self):
         """
-        TODO:放到配置文件
         :return:
         """
         await self.init_session()
@@ -126,6 +154,7 @@ class Crawler:
         self.tc = aiohttp.connector.TCPConnector(limit=300, force_close=True,
                                                  enable_cleanup_closed=True,
                                                  verify_ssl=False)
+
         self.session = aiohttp.ClientSession(connector=self.tc)
         self.session_flag = True
         return self.session
@@ -136,6 +165,19 @@ class Crawler:
             await self.tc.close()
             await self.session.close()
 
+    def start(queue_name=None):
+        def __start(func):
+            @wraps(func)
+            async def _wrap(self, *args, **kwargs):
+                try:
+                    flag = run_flag.get()
+                    if not flag:
+                        await self.fetch_start(func, queue_name=queue_name)
+                    else:
+                        await func(self, *args, **kwargs)
+                except asyncio.CancelledError as e:
+                    crawler.error(e.args)
 
-if __name__ == '__main__':
-    c = Crawler().run()
+            return _wrap
+
+        return __start
