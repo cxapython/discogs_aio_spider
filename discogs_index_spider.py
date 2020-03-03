@@ -18,6 +18,7 @@ import math
 from multidict import CIMultiDict
 from urllib.parse import urljoin
 import sys
+from dataclasses import dataclass
 
 Response = namedtuple("Response",
                       ["status", "text"])
@@ -39,16 +40,15 @@ DEFAULT_HEADERS = CIMultiDict({
 })
 
 
+@dataclass
 class IndexSpider(Crawler):
-    def __init__(self):
-        super().__init__()
-        self.page_pat = "&page=.*&"
+    page_pat: str = "&page=.*&"
 
     @Crawler.start(queue_name="discogs_seed_spider")
-    async def fetch_index_page(self, msg):
+    async def fetch_index_page(self, msg) -> None:
         """
         访问列表，并开始解析
-        :param item:
+        :param msg:
         :return:
         """
         item = msgpack.unpackb(msg.body, raw=False)
@@ -60,20 +60,21 @@ class IndexSpider(Crawler):
                f"format_exact={_format}&limit=100&year={year}&style_exact={style}&page=1&decade=2000")
         kwargs = {"headers": DEFAULT_HEADERS, "timeout": 15}
         # 修改种子URL的状态为1表示开始爬取。
-        response = await self.get_session(url, _kwargs=kwargs)
-        if response.status == 200:
-            source = response.source
-            # 获取当前的链接然后构建所有页数的url。
-            # 保存当一页的内容。
-            have_more = await self.get_list_info(url, source)
-            # 成功完成任务
-            await msg.ack()
-            if have_more:
-                await self.max_page_index(url, source)
-            else:
-                crawler.info(f"该分类没有更多内容:{url}")
+        async with self.http_client() as client:
+            response = await client.get_session(url, _kwargs=kwargs)
+            if response.status == 200:
+                source = response.source
+                # 获取当前的链接然后构建所有页数的url。
+                # 保存当一页的内容。
+                have_more = await self.get_list_info(url, source)
+                # 成功完成任务
+                await msg.ack()
+                if have_more:
+                    await self.max_page_index(url, source)
+                else:
+                    crawler.info(f"该分类没有更多内容:{url}")
 
-    async def get_list_info(self, url:str, source:str):
+    async def get_list_info(self, url: str, source: str):
         """
         为了取得元素的正确性，这里按照块进行处理。
         :param url: 当前页的url
@@ -124,7 +125,7 @@ class IndexSpider(Crawler):
             await MotorOperation().save_data(self.mongo_pool, task)
         return have_more
 
-    async def max_page_index(self, url:str, source:str):
+    async def max_page_index(self, url: str, source: str):
         """
         :param url:
         :param source:

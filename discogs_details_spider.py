@@ -4,7 +4,7 @@
 # @File : discogs_details_spider.py
 # @Software: PyCharm
 import asyncio
-from async_retrying import retry
+from util import aio_retry
 import aiofiles
 from loguru import logger as  crawler
 from loguru import logger as  storage
@@ -19,6 +19,7 @@ from itertools import islice
 from util import decorator, MotorOperation
 import msgpack
 from urllib.parse import urljoin
+from dataclasses import dataclass
 
 DEFAULT_HEADERS = CIMultiDict({
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
@@ -30,12 +31,8 @@ DEFAULT_HEADERS = CIMultiDict({
 })
 
 
+@dataclass
 class DetailsSpider(Crawler):
-
-    def __init__(self):
-        self.db_name = "aio_spider_data"
-        self.page_pat = "&page=.*&"
-        super().__init__()
 
     @Crawler.start(queue_name="discogs_index_spider")
     async def fetch_detail_page(self, msg: str):
@@ -45,29 +42,31 @@ class DetailsSpider(Crawler):
         :return:
         """
         url = msgpack.unpackb(msg.body, raw=False).get("url")
-        detail_url = urljoin(self.spider_config["BASE_URL"], url)
         kwargs = {"headers": DEFAULT_HEADERS}
-        response = await self.get_session(detail_url, _kwargs=kwargs)
-        if response.status == 200:
-            source = response.source
-            if self.spider_config["SAVE_IMG_FILE"]:
-                await self.more_images(source)
-            try:
-                await self.get_list_info(detail_url, source)
-                await msg.ack()
-            except Exception as e:
-                crawler.info(f"解析出错:{detail_url}")
+        async with self.http_client() as client:
+            detail_url = urljoin(self.spider_config["BASE_URL"], url)
+            response = await client.get_session(detail_url, _kwargs=kwargs)
+            if response.status == 200:
+                source = response.source
+                if self.spider_config["SAVE_IMG_FILE"]:
+                    await self.more_images(source)
+                try:
+                    await self.get_list_info(detail_url, source)
+                    await msg.ack()
+                except Exception as e:
+                    crawler.info(f"解析出错:{detail_url}")
 
-    @retry(attempts=3)
+    @aio_retry(attempts=3)
     async def url2base64(self, url):
         """
         将图片专为base64保存
         :param url:
         :return:
         """
-        res = await self.get_session(url, source_type="buff")
-        base64_data = f"data:image/jpg;base64,{base64.b64encode(res.source).decode('utf-8')}"
-        return base64_data
+        async with self.http_client() as client:
+            res = await client.get_session(url, source_type="buff")
+            base64_data = f"data:image/jpg;base64,{base64.b64encode(res.source).decode('utf-8')}"
+            return base64_data
 
     async def get_list_info(self, url, source):
         """
@@ -125,18 +124,20 @@ class DetailsSpider(Crawler):
             _url = islice(more_url_node, 0)
             more_url = urljoin(self.spider_config["BASE_URL"], _url)
             kwargs = {"headers": DEFAULT_HEADERS}
-            response = await self.get_session(more_url, _kwargs=kwargs)
-            if response.status == 200:
-                source = response.source
-                await self.parse_images(source)
+            async with self.http_client() as client:
+                response = await client.get_session(more_url, _kwargs=kwargs)
+                if response.status == 200:
+                    source = response.source
+                    await self.parse_images(source)
 
     async def get_image_buff(self, img_url):
         img_headers = copy(DEFAULT_HEADERS)
         img_headers["host"] = "img.discogs.com"
         kwargs = {"headers": img_headers}
-        response = await self.get_session(img_url, _kwargs=kwargs, source_type="buff")
-        buff = response.source
-        await self.save_image(img_url, buff)
+        async with self.http_client() as client:
+            response = await client.get_session(img_url, _kwargs=kwargs, source_type="buff")
+            buff = response.source
+            await self.save_image(img_url, buff)
 
     @decorator()
     async def save_image(self, img_url, buff):

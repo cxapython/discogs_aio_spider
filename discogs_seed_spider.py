@@ -9,8 +9,8 @@ from collections import namedtuple
 from common.base_crawler import Crawler
 from collections import deque
 from itertools import product
-from loguru import logger
 import sys
+from dataclasses import dataclass
 
 Response = namedtuple("Response",
                       ["status", "text"])
@@ -34,47 +34,23 @@ DEFAULT_HEADERS = {
 }
 
 
+@dataclass
 class SeedSpider(Crawler):
-    def __init__(self):
-        super().__init__()
-
-    async def init_all(self):
-        await self.init_session()
-        await self.rabbitmq_pool.init(
-            addr="127.0.0.1",
-            port="5672",
-            vhost="/",
-            username="guest",
-            password="guest",
-            max_size=10,
-        )
-
-    async def start(self):
-        try:
-            await self.init_all()
-            res_list: list = [asyncio.ensure_future(self.fetch_home(url)) for url in START_URL_LIST]
-            tasks = asyncio.wait(res_list)
-            await tasks
-        except Exception as e:
-            logger.error(f"{e.args}")
-        finally:
-            await self.close_session()
-
+    @Crawler.start(init_mongo=False, starts_url=START_URL_LIST)
     async def fetch_home(self, url: str):
         """
         访问主页，并开始解析
         :param url:
         :return:
-        :param url:
-        :return:
         """
         kwargs = {"headers": DEFAULT_HEADERS}
-        response = await self.get_session(url, _kwargs=kwargs)
-        if response.status == 200:
-            source = response.source
-            await self.parse(source)
+        async with self.http_client() as client:
+            response = await client.get_session(url, _kwargs=kwargs)
+            if response.status == 200:
+                source = response.source
+                await self.parse(source)
 
-    async def parse(self, source:str):
+    async def parse(self, source: str):
         """
         # ul分四块处理, 风格，唱片类型，国家。
         # 分块处理
@@ -132,10 +108,10 @@ if __name__ == '__main__':
     python_version = sys.version_info
     s = SeedSpider()
     if python_version >= (3, 7):
-        asyncio.run(s.start())
+        asyncio.run(s.fetch_home())
     else:
         loop = asyncio.get_event_loop()
         try:
-            loop.run_until_complete(s.start())
+            loop.run_until_complete(s.fetch_home())
         finally:
             loop.close()
