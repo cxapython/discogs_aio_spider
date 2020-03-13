@@ -5,18 +5,12 @@
 # @Software: PyCharm
 # 2000-2009
 import asyncio
-from db.mongohelper import MotorOperation
-from collections import namedtuple
 from common.base_crawler import Crawler
-from decorators.decorators import decorator
-import re
 from collections import deque
 from itertools import product
-from loguru import logger
 import sys
+from dataclasses import dataclass
 
-Response = namedtuple("Response",
-                      ["status", "text"])
 try:
     import uvloop
 
@@ -37,39 +31,28 @@ DEFAULT_HEADERS = {
 }
 
 
+@dataclass
 class SeedSpider(Crawler):
-
-    async def start(self):
-        try:
-            await self.init_session()
-            res_list: list = [asyncio.ensure_future(self.fetch_home(url)) for url in START_URL_LIST]
-            tasks = asyncio.wait(res_list)
-            await tasks
-        except Exception as e:
-            logger.error(f"{e.args}")
-        finally:
-            await self.close_session()
-
+    @Crawler.start(init_mongo=False, starts_url=START_URL_LIST)
     async def fetch_home(self, url: str):
         """
         访问主页，并开始解析
         :param url:
         :return:
-        :param url:
-        :return:
         """
         kwargs = {"headers": DEFAULT_HEADERS}
-        response = await self.get_session(url, kwargs)
-        if response.status == 200:
-            source = response.source
-            await self.parse(source)
+        async with self.http_client() as client:
+            response = await client.get_session(url, _kwargs=kwargs)
+            if response.status == 200:
+                source = response.source
+                await self.parse(source)
 
-    async def parse(self, source):
+    async def parse(self, source: str):
         """
         # ul分四块处理, 风格，唱片类型，国家。
         # 分块处理
-        :param source: 
-        :return: 
+        :param source:
+        :return:
         """
         # keyword = ["Italodance", "House", "Trance"]
         style_dic = dict()
@@ -103,28 +86,29 @@ class SeedSpider(Crawler):
                     type_dic[k].setdefault("name", deque()).append(name)
                     type_dic[k].setdefault("count", deque()).append(count)
 
-        tasks = deque()
-        t_append = tasks.append
-        for item in product([2000, 2001, 2002, 2003], style_dic["url_name"], format_dic["url_name"],
+        for item in product([2000, 2001], style_dic["url_name"], format_dic["url_name"],
                             country_dic["url_name"]):
+            data = dict()
             country = item[3]
             _format = item[2]
             year = item[0]
             style = item[1]
-            url = (f"https://www.discogs.com/search/?layout=sm&country_exact={country}&"
-                   f"format_exact={_format}&limit=100&year={year}&style_exact={style}&page=1&decade=2000")
-            t_append(url)
-        await MotorOperation().save_data_with_status(tasks)
+            data["country"] = country
+            data["format"] = _format
+            data["year"] = year
+            data["style"] = style
+            data["page"] = 1
+            await self.rabbitmq_pool.publish("discogs_seed_spider", data)
 
 
 if __name__ == '__main__':
     python_version = sys.version_info
     s = SeedSpider()
     if python_version >= (3, 7):
-        asyncio.run(s.start())
+        asyncio.run(s.fetch_home())
     else:
         loop = asyncio.get_event_loop()
         try:
-            loop.run_until_complete(s.start())
+            loop.run_until_complete(s.fetch_home())
         finally:
             loop.close()

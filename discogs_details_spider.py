@@ -4,9 +4,8 @@
 # @File : discogs_details_spider.py
 # @Software: PyCharm
 import asyncio
-from async_retrying import retry
+from util import aio_retry
 import aiofiles
-from db.mongohelper import MotorOperation
 from loguru import logger as  crawler
 from loguru import logger as  storage
 import datetime
@@ -14,12 +13,13 @@ import base64
 from copy import copy
 import os
 from common.base_crawler import Crawler
-from types import AsyncGeneratorType
-from decorators.decorators import decorator
-from urllib.parse import urljoin
+import sys
 from multidict import CIMultiDict
 from itertools import islice
-from config.config import SAVE_IMG_BASE64, SAVE_IMG_FILE
+from util import decorator, MotorOperation
+import msgpack
+from urllib.parse import urljoin
+from dataclasses import dataclass
 
 DEFAULT_HEADERS = CIMultiDict({
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
@@ -29,68 +29,60 @@ DEFAULT_HEADERS = CIMultiDict({
     "User-Agent": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_2) "
                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/72.0.3626.121 Safari/537.36"),
 })
-BASE_URL = "https://www.discogs.com"
 
 
+@dataclass
 class DetailsSpider(Crawler):
-    def __init__(self):
-        self.page_pat = "&page=.*&"
 
-    async def create_task_gen(self):
-        data: AsyncGeneratorType = MotorOperation().find_data(col="discogs_index_data")
-        async for item in data:
-            yield asyncio.ensure_future(self.fetch_detail_page(item))
-
-    async def fetch_detail_page(self, item: dict):
+    @Crawler.start(queue_name="discogs_index_spider")
+    async def fetch_detail_page(self, msg: str):
         """
         访问详情页，开始解析
-        :param item:
+        :param msg:队列消息，包括info和body
         :return:
         """
-        detail_url = item.get("detail_url")
+        url = msgpack.unpackb(msg.body, raw=False).get("url")
         kwargs = {"headers": DEFAULT_HEADERS}
-        # 修改种子URL的状态为1表示开始爬取。
-        condition = {'detail_url': detail_url}
-        await MotorOperation().change_status(condition, col="discogs_index_data", status_code=1)
-        response = await self.get_session(detail_url, kwargs)
-        if response.status == 200:
-            source = response.source
-            if SAVE_IMG_FILE:
-                await self.more_images(source)
-            try:
-                await self.get_list_info(item, detail_url, source)
-            except Exception as e:
-                crawler.info(f"解析出错:{detail_url}")
+        async with self.http_client() as client:
+            detail_url = urljoin(self.spider_config["BASE_URL"], url)
+            response = await client.get_session(detail_url, _kwargs=kwargs)
+            if response.status == 200:
+                source = response.source
+                if self.spider_config["SAVE_IMG_FILE"]:
+                    await self.more_images(source)
+                try:
+                    await self.get_list_info(detail_url, source)
+                    await msg.ack()
+                except Exception as e:
+                    crawler.info(f"解析出错:{detail_url}")
 
-    @retry(attempts=3)
+    @aio_retry(attempts=3)
     async def url2base64(self, url):
         """
         将图片专为base64保存
         :param url:
         :return:
         """
-        res = await self.get_session(url, source_type="buff")
-        base64_data = f"data:image/jpg;base64,{base64.b64encode(res.source).decode('utf-8')}"
-        return base64_data
+        async with self.http_client() as client:
+            res = await client.get_session(url, source_type="buff")
+            base64_data = f"data:image/jpg;base64,{base64.b64encode(res.source).decode('utf-8')}"
+            return base64_data
 
-    async def get_list_info(self, data_item, url, source):
+    async def get_list_info(self, url, source):
         """
         为了取得元素的正确性，这里按照块进行处理。
-        :param data_item:
         :param url: 当前页的url
         :param source: 源码
         :return:
         """
-
         cover_xpath = "//meta[@property='og:image']"
         track_div_xpath = "//div[@id='page_content']//table//tr"
         cover_url_list = self.xpath(source, cover_xpath, "content")
         cover_url = cover_url_list[0]
-        if SAVE_IMG_BASE64:
+        if self.spider_config["SAVE_IMG_BASE64"]:
             base64url = await self.url2base64(cover_url)
         div_node_list = self.xpath(source, track_div_xpath)
         title_list = list()
-        save_dic = dict()
         for index, item in enumerate(div_node_list, 1):
             try:
                 artist_node = self.xpath(item, ".//td[@class='tracklist_track_pos']", "text")
@@ -99,7 +91,6 @@ class DetailsSpider(Crawler):
                     title = title_node[0]
                 else:
                     break
-                title = f"{data_item.get('artist')}-{title}"
                 if artist_node:
                     artist = artist_node[0]
                     title = f"{artist}-{title}"
@@ -108,17 +99,17 @@ class DetailsSpider(Crawler):
             except Exception as e:
                 crawler.warning(f"{e.args}")
 
-        save_dic.update(data_item)
+        save_dic = dict()
+
+        save_dic["obj_id"] = url.split('/')[-1]
         save_dic["cover_url"] = cover_url
-        if SAVE_IMG_BASE64:
+        if self.spider_config["SAVE_IMG_BASE64"]:
             save_dic["base64url"] = base64url
         save_dic["title_list"] = title_list
         save_dic["crawler_time"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        save_dic.pop("status")
-        await MotorOperation().save_data(save_dic, col="discogs_details_data", key="detail_url")
-        # 修改种子URL的状态为2表示爬取成功。
-        condition = {"detail_url": url}
-        await MotorOperation().change_status(condition, col="discogs_index_data", status_code=2)
+        # 根据obj_id更新
+        await MotorOperation().save_data(self.mongo_pool, save_dic,
+                                         col="discogs_details_data", key="obj_id")
 
     @decorator()
     async def more_images(self, source):
@@ -131,20 +122,22 @@ class DetailsSpider(Crawler):
                                    "href")
         if more_url_node:
             _url = islice(more_url_node, 0)
-            more_url = urljoin(BASE_URL, _url)
+            more_url = urljoin(self.spider_config["BASE_URL"], _url)
             kwargs = {"headers": DEFAULT_HEADERS}
-            response = await self.get_session(more_url, kwargs)
-            if response.status == 200:
-                source = response.source
-                await self.parse_images(source)
+            async with self.http_client() as client:
+                response = await client.get_session(more_url, _kwargs=kwargs)
+                if response.status == 200:
+                    source = response.source
+                    await self.parse_images(source)
 
     async def get_image_buff(self, img_url):
         img_headers = copy(DEFAULT_HEADERS)
         img_headers["host"] = "img.discogs.com"
         kwargs = {"headers": img_headers}
-        response = await self.get_session(img_url, kwargs, source_type="buff")
-        buff = response.source
-        await self.save_image(img_url, buff)
+        async with self.http_client() as client:
+            response = await client.get_session(img_url, _kwargs=kwargs, source_type="buff")
+            buff = response.source
+            await self.save_image(img_url, buff)
 
     @decorator()
     async def save_image(self, img_url, buff):
@@ -173,8 +166,12 @@ class DetailsSpider(Crawler):
 
 if __name__ == '__main__':
     s = DetailsSpider()
-    loop = asyncio.get_event_loop()
-    try:
-        loop.run_until_complete(s.start())
-    finally:
-        loop.close()
+    python_version = sys.version_info
+    if python_version >= (3, 7):
+        asyncio.run(s.fetch_detail_page())
+    else:
+        loop = asyncio.get_event_loop()
+        try:
+            loop.run_until_complete(s.fetch_detail_page())
+        finally:
+            loop.close()

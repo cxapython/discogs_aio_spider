@@ -8,15 +8,24 @@ import asyncio
 import aiohttp
 from loguru import logger as crawler
 import async_timeout
-from collections import namedtuple
-from config.config import *
-from async_retrying import retry
+from util import aio_retry
 from lxml import html
-from aiostream import stream
+from util import RabbitMqPool, MongoPool
+from config import MongoConfig, RabbitmqConfig, SpiderConfig
+from functools import wraps
+from dataclasses import dataclass
+from typing import Optional, Dict, Any, Union, List, Callable, Type, AsyncIterator, Awaitable
+from types import TracebackType
 from copy import deepcopy
+from contextvars import ContextVar
+from contextlib import asynccontextmanager
 import traceback
-Response = namedtuple("Response",
-                      ["status", "source"])
+from pydantic import BaseModel
+
+Node = List[str]
+run_flag: ContextVar = ContextVar('which function will run in decorator')
+
+run_flag.set(False)
 
 try:
     import uvloop
@@ -24,17 +33,42 @@ try:
     asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 except ImportError:
     pass
-sem = asyncio.Semaphore(CONCURRENCY_NUM)
 
 
-class Crawler:
-    def __init__(self):
-        self.tc = None
-        self.session = None
-        self.session_flag = False
+class Response(BaseModel):
+    status: int
+    source: str
 
-    @retry(attempts=MAX_RETRY_TIMES)
-    async def get_session(self, url, _kwargs=None, source_type="text", status_code=200) -> Response:
+
+@dataclass
+class HTTPClient:
+    def __post_init__(self):
+        self.spider_config = SpiderConfig
+
+        self.tc = aiohttp.connector.TCPConnector(limit=300, force_close=True,
+                                                 enable_cleanup_closed=True,
+                                                 ssl=False)
+
+        self.session = aiohttp.ClientSession(connector=self.tc)
+
+    async def close(self):
+        crawler.info("close session")
+        return await asyncio.gather(self.tc.close(), self.session.close())
+
+    async def __aenter__(self) -> "HTTPClient":
+        return self
+
+    async def __aexit__(self,
+                        exc_type: Optional[Type[BaseException]],
+                        exc_val: Optional[BaseException],
+                        exc_tb: Optional[TracebackType], ) -> Optional[bool]:
+        await self.close()
+        return None
+
+    @aio_retry()
+    async def get_session(self, url: str, _kwargs: Optional[Dict[str, Any]] = None,
+                          source_type: str = "text",
+                          status_code: int = 200) -> Response:
         """
 
         :param url:
@@ -46,7 +80,7 @@ class Crawler:
         if _kwargs is None:
             _kwargs = dict()
         kwargs = deepcopy(_kwargs)
-        if USE_PROXY:
+        if self.spider_config.get("USE_PROXY"):
             kwargs["proxy"] = await self.get_proxy()
         method = kwargs.pop("method", "get")
         timeout = kwargs.pop("timeout", 5)
@@ -63,10 +97,61 @@ class Crawler:
         res = Response(status=status, source=source)
         return res
 
+
+@dataclass
+class Crawler:
+    session_flag: bool = False
+
+    def __post_init__(self):
+        self.spider_config = SpiderConfig
+        self.rabbitmq_pool = RabbitMqPool()
+        self.mongo_config = MongoConfig
+        self.mongo_pool = MongoPool
+        self.rabbitmq_config = RabbitmqConfig
+
+    @classmethod
+    @asynccontextmanager
+    async def http_client(cls) -> AsyncIterator[HTTPClient]:
+        client = HTTPClient()
+        try:
+            yield client
+        finally:
+            await client.close()
+
+    async def init_all(self, *, init_rabbit, init_mongo) -> None:
+        """
+        :return:
+        """
+        if init_rabbit and self.rabbitmq_pool:
+            crawler.info("init rabbit_mq")
+            await self.rabbitmq_pool.init(
+                addr=self.rabbitmq_config["addr"],
+                port=self.rabbitmq_config["port"],
+                vhost=self.rabbitmq_config["vhost"],
+                username=self.rabbitmq_config["username"],
+                password=self.rabbitmq_config["password"],
+                max_size=self.rabbitmq_config["max_size"],
+            )
+        if init_mongo and self.mongo_pool:
+            crawler.info("init mongo")
+            self.mongo_pool(
+                host=self.mongo_config["host"],
+                port=self.mongo_config["port"],
+                maxPoolSize=self.mongo_config["max_pool_size"],
+                minPoolSize=self.mongo_config["min_pool_size"]
+            )
+
     @staticmethod
-    def xpath(_response, rule, _attr=None):
+    def xpath(_response: Union[Response, str],
+              rule: str, _attr: Optional[str] = None) -> Node:
+        """
+        :param _response: response object or text
+        :param rule: xpath rule
+        :param _attr: attr
+        :return:
+        """
         if isinstance(_response, Response):
-            source = _response.text
+            source = _response.source
             root = html.fromstring(source)
 
         elif isinstance(_response, str):
@@ -75,7 +160,6 @@ class Crawler:
         else:
             root = _response
         nodes = root.xpath(rule)
-        result = list()
         if _attr:
             if _attr == "text":
                 result = [entry.text for entry in nodes]
@@ -85,74 +169,52 @@ class Crawler:
             result = nodes
         return result
 
-    async def branch(self, coros, limit=10):
-        """
-        使用aiostream模块对异步生成器做一个切片操作。这里并发量为10.
-        :param coros: 是一个异步生成器函数调用之前的
-        :param limit: 并发次数
-        :return:
-        """
-        if callable(coros):
-            index = 0
-            while True:
-                xs = stream.iterate(coros())
-                ys = xs[index:index + limit]
-                t = await stream.list(ys)
-                if not t:
-                    break
-                await asyncio.wait(t)
-                index += limit
-                await asyncio.sleep(0.01)
-
-    async def start(self):
+    async def fetch_start(self, callback: Callable[..., Awaitable],
+                          init_rabbit=True, init_mongo=True,
+                          queue_name: Optional[str] = None, starts_url=None) -> None:
         try:
-            await self.init_session()
-            tasks = self.create_task_gen
-            await self.branch(tasks)
-        except asyncio.CancelledError as e:
-            crawler.error("CancelledError")
+            run_flag.set(True)
+            await self.init_all(init_rabbit=init_rabbit, init_mongo=init_mongo)
+
+            if starts_url is None:
+                await self.rabbitmq_pool.subscribe(queue_name, eval(f"self.{callback.__name__}"))
+            else:
+                res_list = [asyncio.ensure_future(getattr(self, callback.__name__)(url)) for url in starts_url]
+                tasks = asyncio.wait(res_list)
+                await tasks
+
+        except (asyncio.CancelledError, asyncio.TimeoutError) as e:
+            crawler.error("asyncio cancelle or timeout error")
         except Exception as e:
             crawler.error(f"else error:{traceback.format_exc()}")
-        finally:
-            await self.close_session()
 
-    # async def get_proxy(self) -> Optional[str]:
-    #     """
-    #     获取代理
-    #     """
-    #     while True:
-    #         proxy = await proxy_helper.get_proxy(isown=1, protocol=2, site='dianping')
-    #         if proxy:
-    #             host = proxy[0].get('ip')
-    #             port = proxy[0].get('port')
-    #             ip = f"http://{host}:{port}"
-    #             return ip
-    #         else:
-    #             crawler.info("代理超时开始等待")
-    #
-    #             await asyncio.sleep(5)
-
-    async def init_session(self):
+    async def get_proxy(self):
         """
-        创建Tcpconnector，包括ssl和连接数的限制
-        创建一个全局session。
+        代理部分
         :return:
         """
-        crawler.info("init session")
+        pass
 
-        self.tc = aiohttp.connector.TCPConnector(limit=300, force_close=True,
-                                                 enable_cleanup_closed=True,
-                                                 verify_ssl=False)
-        self.session = aiohttp.ClientSession(connector=self.tc)
-        self.session_flag = True
-        return self.session
+    def start(init_mongo: bool = True,
+              init_rabbit: bool = True,
+              queue_name: str = None,
+              starts_url: List[str] = None):
 
-    async def close_session(self):
-        if self.session_flag:
-            crawler.info("close session")
-            await self.tc.close()
-            await self.session.close()
+        def __start(func):
+            @wraps(func)
+            async def _wrap(self, *args, **_kwargs):
+                try:
+                    flag = run_flag.get()
+                    if not flag:
+                        await self.fetch_start(func, queue_name=queue_name,
+                                               init_mongo=init_mongo, init_rabbit=init_rabbit,
+                                               starts_url=starts_url
+                                               )
+                    else:
+                        await func(self, *args, **_kwargs)
+                except asyncio.CancelledError as e:
+                    crawler.error(e.args)
 
+            return _wrap
 
-if __name__ == '__main__':
-    c = Crawler().run()
+        return __start

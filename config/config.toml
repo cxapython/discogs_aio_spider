@@ -1,0 +1,19 @@
+[rabbitmq]
+    addr="127.0.0.1"
+    port="5672"
+    vhost="/"
+    username="guest"
+    password="guest"
+    max_size=10
+[mongo]
+    host="127.0.0.1"
+    port=27017
+    max_pool_size=20
+    min_pool_size=5
+[spider]
+    CONCURRENCY_NUM = 5
+    MAX_RETRY_TIMES = 3
+    USE_PROXY = false
+    SAVE_IMG_BASE64 = false
+    SAVE_IMG_FILE = false
+    BASE_URL = "https://www.discogs.com"

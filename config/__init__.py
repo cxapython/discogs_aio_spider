@@ -3,3 +3,10 @@
 # @Author : cxa
 # @File : __init__.py.py
 # @Software: PyCharm
+from config.config import config
+
+c = config()
+RabbitmqConfig = c.get("rabbitmq")
+MongoConfig = c.get("mongo")
+SpiderConfig = c.get("spider")
+__all__ = ["RabbitmqConfig", "MongoConfig", "SpiderConfig"]
