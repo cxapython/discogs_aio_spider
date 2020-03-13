@@ -7,23 +7,27 @@
 import aio_pika
 from typing import Callable, Dict
 from logging import getLogger, WARNING
-
 from aio_pika import connect_robust, Channel, pool, IncomingMessage, Message
 
 from util.singleton import Singleton
 from util.decorators import decorator
 import msgpack
+from config import SpiderConfig
+from dataclasses import dataclass
+
+CONCURRENCY_NUM = SpiderConfig.get("CONCURRENCY_NUM")
 
 
+@dataclass
 class RabbitMqPool(Singleton):
-    def __init__(self):
-        self._logger = getLogger()
-        self._url: str = None
-        self._max_size: int = None
-        self._connection_pool: pool.Pool = None
-        self._channel_pool: pool.Pool = None
+    _url: str = None
+    _max_size: int = None
+    _connection_pool: pool.Pool = None
+    _channel_pool: pool.Pool = None
 
+    def __post_init__(self):
         # 禁用aio_pika日志
+        self._logger = getLogger()
         disable_aiopika_logger()
 
     async def init(self, addr: str, port: str, vhost: str, username: str, password: str, max_size: int):
@@ -51,16 +55,14 @@ class RabbitMqPool(Singleton):
         对一个队列中的数据消费
         """
         async with self._channel_pool.acquire() as channel:
-            await channel.set_qos(10)
+            await channel.set_qos(CONCURRENCY_NUM)
 
             queue = await channel.declare_queue(
                 name=queue_name, passive=True
             )
-
             async with queue.iterator() as queue_iter:
                 async for message in queue_iter:
                     await callback(message)
-
                     # 完成任务，已经加到每个爬虫文件
                     # await message.ack()
 

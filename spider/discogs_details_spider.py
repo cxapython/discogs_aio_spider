@@ -163,15 +163,3 @@ class DetailsSpider(Crawler):
         tasks = [asyncio.ensure_future(self.get_image_buff(url)) for url in image_node_list]
         await tasks
 
-
-if __name__ == '__main__':
-    s = DetailsSpider()
-    python_version = sys.version_info
-    if python_version >= (3, 7):
-        asyncio.run(s.fetch_detail_page())
-    else:
-        loop = asyncio.get_event_loop()
-        try:
-            loop.run_until_complete(s.fetch_detail_page())
-        finally:
-            loop.close()

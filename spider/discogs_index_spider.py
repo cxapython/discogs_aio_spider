@@ -9,7 +9,7 @@ import asyncio
 import msgpack
 
 from util import MotorOperation
-from loguru import logger as  crawler
+from loguru import logger as crawler
 import datetime
 from common.base_crawler import Crawler
 import re
@@ -18,6 +18,7 @@ from multidict import CIMultiDict
 from urllib.parse import urljoin
 import sys
 from dataclasses import dataclass
+
 try:
     import uvloop
 
@@ -35,12 +36,14 @@ DEFAULT_HEADERS = CIMultiDict({
                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/72.0.3626.121 Safari/537.36"),
 })
 
+QUEUE_NAME = "discogs_seed_spider"
+
 
 @dataclass
 class IndexSpider(Crawler):
     page_pat: str = "&page=.*&"
 
-    @Crawler.start(queue_name="discogs_seed_spider")
+    @Crawler.start(queue_name=QUEUE_NAME)
     async def fetch_index_page(self, msg) -> None:
         """
         访问列表，并开始解析
@@ -48,6 +51,11 @@ class IndexSpider(Crawler):
         :return:
         """
         item = msgpack.unpackb(msg.body, raw=False)
+        result = await self.request_seen(QUEUE_NAME, item)
+        if result:
+            await self.redis_client.destroy_redis_pool()
+            await msg.ack()
+            return
         country = item["country"]
         _format = item["format"]
         year = item["year"]
@@ -69,6 +77,7 @@ class IndexSpider(Crawler):
                     await self.max_page_index(url, source)
                 else:
                     crawler.info(f"该分类没有更多内容:{url}")
+                    return True
 
     async def get_list_info(self, url: str, source: str):
         """
@@ -111,7 +120,6 @@ class IndexSpider(Crawler):
                 """
                 await self.rabbitmq_pool.publish("discogs_index_spider",
                                                  {"url": _detail_url})
-
 
             except IndexError as e:
                 # https://www.discogs.com/search/?layout=sm&country_exact=Unknown&format_exact=Cassette&limit=100&year=2000&style_exact=House&page=1&decade=2000

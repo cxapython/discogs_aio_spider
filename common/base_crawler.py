@@ -10,8 +10,8 @@ from loguru import logger as crawler
 import async_timeout
 from util import aio_retry
 from lxml import html
-from util import RabbitMqPool, MongoPool
-from config import MongoConfig, RabbitmqConfig, SpiderConfig
+from util import RabbitMqPool, MongoPool, RedisPool
+from config import MongoConfig, RabbitmqConfig, SpiderConfig, RedisConfig
 from functools import wraps
 from dataclasses import dataclass
 from typing import Optional, Dict, Any, Union, List, Callable, Type, AsyncIterator, Awaitable
@@ -21,6 +21,10 @@ from contextvars import ContextVar
 from contextlib import asynccontextmanager
 import traceback
 from pydantic import BaseModel
+import hashlib
+import msgpack
+from collections.abc import Mapping
+import aioredis
 
 Node = List[str]
 run_flag: ContextVar = ContextVar('which function will run in decorator')
@@ -101,6 +105,7 @@ class HTTPClient:
 @dataclass
 class Crawler:
     session_flag: bool = False
+    redis_client: Optional[aioredis.create_redis_pool] = None
 
     def __post_init__(self):
         self.spider_config = SpiderConfig
@@ -108,6 +113,8 @@ class Crawler:
         self.mongo_config = MongoConfig
         self.mongo_pool = MongoPool
         self.rabbitmq_config = RabbitmqConfig
+        self.redis_pool = RedisPool
+        self.redis_config = RedisConfig
 
     @classmethod
     @asynccontextmanager
@@ -140,6 +147,12 @@ class Crawler:
                 maxPoolSize=self.mongo_config["max_pool_size"],
                 minPoolSize=self.mongo_config["min_pool_size"]
             )
+
+    async def init_redis(self):
+        loop = asyncio.get_running_loop()
+        self.redis_client = self.redis_pool(redis_url=self.redis_config["REDIS_URL"], loop=loop)
+        pool = await self.redis_client.create_redis_pool()
+        return pool
 
     @staticmethod
     def xpath(_response: Union[Response, str],
@@ -194,6 +207,27 @@ class Crawler:
         :return:
         """
         pass
+
+    def request_fingerprint(self, item):
+        if isinstance(item, Mapping):
+            data = msgpack.packb(item)
+        elif isinstance(item, str):
+            data = bytes(item, encoding="utf-8")
+        m = hashlib.md5()
+        m.update(data)
+        return m.hexdigest()
+
+    async def request_seen(self, key, item):
+        """
+
+        :param request:
+        :return:
+        """
+        fp = self.request_fingerprint(item)
+        # This returns the number of values added, zero if already exists.
+        pool = await self.init_redis()
+        added = await pool.sadd(key, fp)
+        return added == 0
 
     def start(init_mongo: bool = True,
               init_rabbit: bool = True,

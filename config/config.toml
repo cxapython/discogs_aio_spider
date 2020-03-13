@@ -17,3 +17,8 @@
     SAVE_IMG_BASE64 = false
     SAVE_IMG_FILE = false
     BASE_URL = "https://www.discogs.com"
+[redis]
+    REDIS_POOL_KEY = 'redis_pool'
+    REDIS_URL = "redis://@127.0.0.1:6379/1"
+    REDIS_POOL_MIN = 5
+    REDIS_POOL_MAX = 10
