@@ -4,6 +4,9 @@
 # @File : discogs_details_spider.py
 # @Software: PyCharm
 import asyncio
+import sys
+
+sys.path.append("..")
 from util import aio_retry
 import aiofiles
 from loguru import logger as  crawler
@@ -14,35 +17,35 @@ from copy import copy
 import os
 from common.base_crawler import Crawler
 import sys
-from multidict import CIMultiDict
 from itertools import islice
 from util import decorator, MotorOperation
-import msgpack
+from typing import Dict
 from urllib.parse import urljoin
 from dataclasses import dataclass
 
-DEFAULT_HEADERS = CIMultiDict({
+DEFAULT_HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
     "Accept-Encoding": "gzip, deflate, br",
     "Accept-Language": "zh-CN,zh;q=0.9",
     "Host": "www.discogs.com",
     "User-Agent": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_2) "
                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/72.0.3626.121 Safari/537.36"),
-})
+}
+QUEUE_NAME = "discogs_index_spider"
 
 
 @dataclass
 class DetailsSpider(Crawler):
-
-    @Crawler.start(queue_name="discogs_index_spider")
-    async def fetch_detail_page(self, msg: str):
+    @Crawler.start(queue_name=QUEUE_NAME)
+    async def fetch_detail_page(self, _item: Dict[str, str], msg: str):
         """
-        访问详情页，开始解析
-        :param msg:队列消息，包括info和body
+        Visit the details page and start parsing
+         :param _item:Data after deserialization
+        :param msg:Queue messages, including info and body
         :return:
         """
-        url = msgpack.unpackb(msg.body, raw=False).get("url")
-        kwargs = {"headers": DEFAULT_HEADERS}
+        url = _item.get("url")
+        kwargs = {"headers": DEFAULT_HEADERS, "timeout": 10}
         async with self.http_client() as client:
             detail_url = urljoin(self.spider_config["BASE_URL"], url)
             response = await client.get_session(detail_url, _kwargs=kwargs)
@@ -54,12 +57,12 @@ class DetailsSpider(Crawler):
                     await self.get_list_info(detail_url, source)
                     await msg.ack()
                 except Exception as e:
-                    crawler.info(f"解析出错:{detail_url}")
+                    crawler.info(f"Parsing Error,Error {detail_url=}")
 
     @aio_retry(attempts=3)
     async def url2base64(self, url):
         """
-        将图片专为base64保存
+        Save pictures exclusively for base64
         :param url:
         :return:
         """
@@ -70,9 +73,9 @@ class DetailsSpider(Crawler):
 
     async def get_list_info(self, url, source):
         """
-        为了取得元素的正确性，这里按照块进行处理。
-        :param url: 当前页的url
-        :param source: 源码
+        In order to obtain the correctness of the elements, the processing is performed in blocks.
+        :param url: The url of the current page
+        :param source: html source
         :return:
         """
         cover_xpath = "//meta[@property='og:image']"
@@ -114,7 +117,7 @@ class DetailsSpider(Crawler):
     @decorator()
     async def more_images(self, source):
         """
-        获取更多图片的链接
+        Get links to more images
         :param source:
         :return:
         """
@@ -146,7 +149,6 @@ class DetailsSpider(Crawler):
         image_path = os.path.join(file_path, image_name)
         if not os.path.exists(file_path):
             os.makedirs(file_path)
-            # 文件是否存在
         if not os.path.exists(image_path):
             storage.info(f"SAVE_PATH:{image_path}")
             async with aiofiles.open(image_path, 'wb') as f:
@@ -155,7 +157,7 @@ class DetailsSpider(Crawler):
     @decorator()
     async def parse_images(self, source):
         """
-        解析当前页所有图片的链接
+        Parse the links of all pictures on the current page
         :param source:
         :return:
         """
@@ -165,8 +167,8 @@ class DetailsSpider(Crawler):
 
 
 if __name__ == '__main__':
-    s = DetailsSpider()
     python_version = sys.version_info
+    s = DetailsSpider()
     if python_version >= (3, 7):
         asyncio.run(s.fetch_detail_page())
     else:

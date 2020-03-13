@@ -7,5 +7,6 @@ from .mongo_helper import MongoPool, MotorOperation
 from .rabbitmq_helper import RabbitMqPool
 from .decorators import decorator
 from .retry_helper import aio_retry
+from .redis_helper import RedisPool
 
-__all__ = ["MongoPool", "MotorOperation", "RabbitMqPool", "decorator", "aio_retry"]
+__all__ = ["MongoPool", "MotorOperation", "RabbitMqPool", "decorator", "aio_retry","RedisPool"]

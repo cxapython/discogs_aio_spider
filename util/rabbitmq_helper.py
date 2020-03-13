@@ -4,30 +4,34 @@
 # @文件名 : rabbitmq_helper.py
 # @公众号: Python学习开发
 
-import aio_pika
-from typing import Callable, Dict
+from dataclasses import dataclass
 from logging import getLogger, WARNING
+from typing import Callable, Dict
 
+import aio_pika
+import msgpack
 from aio_pika import connect_robust, Channel, pool, IncomingMessage, Message
 
-from util.singleton import Singleton
+from config import SpiderConfig
 from util.decorators import decorator
-import msgpack
+from util.singleton import Singleton
+
+CONCURRENCY_NUM = SpiderConfig.get("CONCURRENCY_NUM")
 
 
+@dataclass
 class RabbitMqPool(Singleton):
-    def __init__(self):
-        self._logger = getLogger()
-        self._url: str = None
-        self._max_size: int = None
-        self._connection_pool: pool.Pool = None
-        self._channel_pool: pool.Pool = None
+    _url: str = None
+    _max_size: int = None
+    _connection_pool: pool.Pool = None
+    _channel_pool: pool.Pool = None
 
-        # 禁用aio_pika日志
+    def __post_init__(self):
+        # Disable aio_pika log
+        self._logger = getLogger()
         disable_aiopika_logger()
 
     async def init(self, addr: str, port: str, vhost: str, username: str, password: str, max_size: int):
-        # TODO: 支持ssl
         self._size = max_size
         self._url = f"amqp://{username}:{password}@{addr}:{port}/{vhost}"
         self._connection_pool = pool.Pool(
@@ -48,26 +52,24 @@ class RabbitMqPool(Singleton):
     @decorator(False)
     async def subscribe(self, queue_name: str, callback: Callable[[IncomingMessage], None]) -> None:
         """
-        对一个队列中的数据消费
+        Consumption of data in a queue
         """
         async with self._channel_pool.acquire() as channel:
-            await channel.set_qos(10)
+            await channel.set_qos(CONCURRENCY_NUM)
 
             queue = await channel.declare_queue(
                 name=queue_name, passive=True
             )
-
             async with queue.iterator() as queue_iter:
                 async for message in queue_iter:
                     await callback(message)
-
-                    # 完成任务，已经加到每个爬虫文件
+                    # Complete the task, has been added to each crawler file
                     # await message.ack()
 
     @decorator(False)
     async def publish(self, queue_name: str, msg: Dict[str, str]) -> None:
         """
-        发布消息
+        release the message
         """
         task = msgpack.packb(msg)
         async with self._channel_pool.acquire() as channel:
@@ -79,8 +81,8 @@ class RabbitMqPool(Singleton):
 
 def disable_aiopika_logger():
     """
-    禁用 aio-pika 的日志
-    调用此函数之后可以屏蔽掉 aio-pika ``WARNING`` 等级以下的日志输出
+   Disable the log of aio-pika
+     After calling this function, you can block the log output below aio-pika ``WARNING'' level
     """
     loggers = (
         aio_pika.channel.log,

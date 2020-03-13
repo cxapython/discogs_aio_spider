@@ -4,6 +4,10 @@
 # @File : discogs_seed_spider.py
 # @Software: PyCharm
 # 2000-2009
+import sys
+
+sys.path.append("..")
+
 import asyncio
 from common.base_crawler import Crawler
 from collections import deque
@@ -19,9 +23,6 @@ except ImportError:
     pass
 START_URL_LIST = [f"https://www.discogs.com/search/?limit=25&layout=sm&decade=2000&year={i}&page=1"
                   for i in range(2000, 2001)]
-# 最终形式
-BASE_URL = ("https://www.discogs.com/search/?layout=sm&country_exact=UK&format_exact=Vinyl&limit=100&year=2000&"
-            "style_exact=House&page=2&decade=2000")
 DEFAULT_HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
     "Accept-Encoding": "gzip, deflate, br",
@@ -36,7 +37,7 @@ class SeedSpider(Crawler):
     @Crawler.start(init_mongo=False, starts_url=START_URL_LIST)
     async def fetch_home(self, url: str):
         """
-        访问主页，并开始解析
+        Visit the homepage and start parsing
         :param url:
         :return:
         """
@@ -47,14 +48,35 @@ class SeedSpider(Crawler):
                 source = response.source
                 await self.parse(source)
 
+    @staticmethod
+    def create_url_gen(*, style_dic=None, format_dic=None, country_dic=None):
+        if style_dic is None:
+            style_dic = dict()
+        if format_dic is None:
+            format_dic = dict()
+        if country_dic is None:
+            country_dic = dict()
+        for item in product([2000, 2001], style_dic["url_name"], format_dic["url_name"],
+                            country_dic["url_name"]):
+            data = dict()
+            country = item[3]
+            _format = item[2]
+            year = item[0]
+            style = item[1]
+            data["country"] = country
+            data["format"] = _format
+            data["year"] = year
+            data["style"] = style
+            data["page"] = 1
+            yield data
+
     async def parse(self, source: str):
         """
-        # ul分四块处理, 风格，唱片类型，国家。
-        # 分块处理
+        # ul is divided into four parts to deal with, style, record type, country.
+        # Divide into blocks
         :param source:
         :return:
         """
-        # keyword = ["Italodance", "House", "Trance"]
         style_dic = dict()
         format_dic = dict()
         country_dic = dict()
@@ -70,9 +92,6 @@ class SeedSpider(Crawler):
                 _type = self.xpath(item, "@href")[0]
                 name = self.xpath(item, ".//span[@class='facet_name']", "text")[0].strip("\n").strip()
                 url_name = name.replace(" ", "+")
-                # r = v.split("facets_")[1]
-                # pat = re.compile(f"{r}=(.*?)&")
-                # url_name = pat.findall(_type)[0]
                 if k == "style":
                     if (
                             "ITALO" in name.upper() or "DANCE" in name.upper() or "HOUSE" in name.upper() or "TECHNO" in name.upper()
@@ -85,23 +104,16 @@ class SeedSpider(Crawler):
                     type_dic[k].setdefault("url_name", deque()).append(url_name)
                     type_dic[k].setdefault("name", deque()).append(name)
                     type_dic[k].setdefault("count", deque()).append(count)
+        url_gen = self.create_url_gen(style_dic=style_dic,
+                                      format_dic=format_dic,
+                                      country_dic=country_dic)
 
-        for item in product([2000, 2001], style_dic["url_name"], format_dic["url_name"],
-                            country_dic["url_name"]):
-            data = dict()
-            country = item[3]
-            _format = item[2]
-            year = item[0]
-            style = item[1]
-            data["country"] = country
-            data["format"] = _format
-            data["year"] = year
-            data["style"] = style
-            data["page"] = 1
+        for data in url_gen:
             await self.rabbitmq_pool.publish("discogs_seed_spider", data)
+            await asyncio.sleep(0.01)
 
 
-if __name__ == '__main__':
+def start_seed():
     python_version = sys.version_info
     s = SeedSpider()
     if python_version >= (3, 7):
@@ -112,3 +124,7 @@ if __name__ == '__main__':
             loop.run_until_complete(s.fetch_home())
         finally:
             loop.close()
+
+
+if __name__ == '__main__':
+    start_seed()

@@ -9,4 +9,5 @@ c = config()
 RabbitmqConfig = c.get("rabbitmq")
 MongoConfig = c.get("mongo")
 SpiderConfig = c.get("spider")
-__all__ = ["RabbitmqConfig", "MongoConfig", "SpiderConfig"]
+RedisConfig = c.get("redis")
+__all__ = ["RabbitmqConfig", "MongoConfig", "SpiderConfig", "RedisConfig"]

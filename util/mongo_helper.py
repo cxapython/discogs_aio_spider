@@ -3,12 +3,13 @@
 # @作者 : 陈祥安
 # @文件名 : mongo_helper.py
 # @公众号: Python学习开发
+import asyncio
+
+from loguru import logger as storage
 from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import UpdateOne
 
 from util.singleton import Singleton
-import asyncio
-from loguru import logger as storage
-from pymongo import UpdateOne
 
 try:
     import uvloop
@@ -27,7 +28,7 @@ db_configs = {
 
 class MongoPool(AsyncIOMotorClient, Singleton):
     """
-    全局mongo连接池
+    Global mongo connection pool
     """
     pass
 
@@ -37,7 +38,7 @@ class MotorOperation:
         self.__dict__.update(**db_configs)
 
     async def add_index(self, col="discogs_details_data"):
-        # 添加索引
+        # Add index
         mb = self.get_db()
 
         await mb[col].create_index('url')
@@ -61,7 +62,7 @@ class MotorOperation:
                         {'$set': item},
                         upsert=True))
                 except Exception as e:
-                    storage.error(f"数据插入出错:{e.args}此时的item是:{item}")
+                    storage.error(f"Error when inserting data:{e.args},The item at this time is:{item}")
             result = await mb[col].bulk_write(requests, ordered=False, bypass_document_validation=True)
             storage.info(f"modified_count:{result.modified_count}")
         elif isinstance(items, dict):
@@ -71,7 +72,7 @@ class MotorOperation:
                     {'$set': items},
                     upsert=True)
             except Exception as e:
-                storage.error(f"数据插入出错:{e.args}此时的item是:{items}")
+                storage.error(f"Error when inserting data:{e.args},The item at this time is:{item}")
 
     async def find_data(self, pool, col="discogs_details_data"):
         mb = pool()[self.db_name]

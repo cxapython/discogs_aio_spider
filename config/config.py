@@ -3,10 +3,11 @@
 # @Author : cxa
 # @File : config.py.py
 # @Software: PyCharm
+import os
+import traceback
+
 import toml
 from loguru import logger
-import traceback
-import os
 
 _temp = os.path.dirname(os.path.abspath(__file__))
 
@@ -30,7 +31,7 @@ def config():
         with open(toml_file, mode="r", encoding="utf-8") as fs:
             data = toml.load(fs)
     except Exception as e:
-        logger.error(f"读取配置错误！:{traceback.format_exc()}")
+        logger.error(f"Read configuration error！:{traceback.format_exc()}")
     config_data=dict()
     return data
 

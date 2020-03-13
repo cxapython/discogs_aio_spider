@@ -5,19 +5,19 @@
 # @Software: PyCharm
 # 2000-2009
 import asyncio
+import sys
 
-import msgpack
-
+sys.path.append("..")
 from util import MotorOperation
-from loguru import logger as  crawler
+from loguru import logger as crawler
 import datetime
 from common.base_crawler import Crawler
 import re
 import math
-from multidict import CIMultiDict
 from urllib.parse import urljoin
 import sys
 from dataclasses import dataclass
+
 try:
     import uvloop
 
@@ -25,56 +25,60 @@ try:
 except ImportError:
     pass
 BASE_URL = "https://www.discogs.com"
-# 最终形式
-DEFAULT_HEADERS = CIMultiDict({
+DEFAULT_HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
     "Accept-Encoding": "gzip, deflate, br",
     "Accept-Language": "zh-CN,zh;q=0.9",
     "Host": "www.discogs.com",
     "User-Agent": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_2) "
                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/72.0.3626.121 Safari/537.36"),
-})
+}
+
+QUEUE_NAME = "discogs_seed_spider"
 
 
 @dataclass
 class IndexSpider(Crawler):
     page_pat: str = "&page=.*&"
 
-    @Crawler.start(queue_name="discogs_seed_spider")
-    async def fetch_index_page(self, msg) -> None:
+    @Crawler.start(queue_name=QUEUE_NAME)
+    async def fetch_index_page(self, _item, msg) -> None:
         """
-        访问列表，并开始解析
+        Visit the list page and start parsing
         :param msg:
+        :param _item:
         :return:
         """
-        item = msgpack.unpackb(msg.body, raw=False)
+        item = _item
         country = item["country"]
         _format = item["format"]
         year = item["year"]
         style = item["style"]
         url = (f"https://www.discogs.com/search/?layout=sm&country_exact={country}&"
                f"format_exact={_format}&limit=100&year={year}&style_exact={style}&page=1&decade=2000")
+        # headers's value must be dict type.
         kwargs = {"headers": DEFAULT_HEADERS, "timeout": 15}
-        # 修改种子URL的状态为1表示开始爬取。
+        # Modifying the status of the seed link to 1 means that crawling has started.
         async with self.http_client() as client:
             response = await client.get_session(url, _kwargs=kwargs)
             if response.status == 200:
                 source = response.source
-                # 获取当前的链接然后构建所有页数的url。
-                # 保存当一页的内容。
+                # Get the current link and construct the url of all pages.
+                # Save the html source of the current page.
                 have_more = await self.get_list_info(url, source)
-                # 成功完成任务
+                # Successfully completed the task
                 await msg.ack()
                 if have_more:
                     await self.max_page_index(url, source)
                 else:
-                    crawler.info(f"该分类没有更多内容:{url}")
+                    crawler.info(f"No more content in this category ,now {url=}")
+                    return True
 
     async def get_list_info(self, url: str, source: str):
         """
-        为了取得元素的正确性，这里按照块进行处理。
-        :param url: 当前页的url
-        :param source: 源码
+        In order to obtain the correctness of the elements, the processing is performed in blocks.
+        :param url: The url of the current page
+        :param source: html source
         :return:
         """
         have_more = False
@@ -112,10 +116,9 @@ class IndexSpider(Crawler):
                 await self.rabbitmq_pool.publish("discogs_index_spider",
                                                  {"url": _detail_url})
 
-
             except IndexError as e:
                 # https://www.discogs.com/search/?layout=sm&country_exact=Unknown&format_exact=Cassette&limit=100&year=2000&style_exact=House&page=1&decade=2000
-                crawler.error(f"解析出错，此时的url是:{url}")
+                crawler.error(f"Parsing error, the url at this time is:{url=}")
         if task:
             have_more = True
             await MotorOperation().save_data(self.mongo_pool, task)
