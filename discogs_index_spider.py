@@ -10,7 +10,6 @@ import msgpack
 
 from util import MotorOperation
 from loguru import logger as  crawler
-from collections import namedtuple
 import datetime
 from common.base_crawler import Crawler
 import re
@@ -19,9 +18,6 @@ from multidict import CIMultiDict
 from urllib.parse import urljoin
 import sys
 from dataclasses import dataclass
-
-Response = namedtuple("Response",
-                      ["status", "text"])
 try:
     import uvloop
 

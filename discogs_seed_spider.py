@@ -5,15 +5,12 @@
 # @Software: PyCharm
 # 2000-2009
 import asyncio
-from collections import namedtuple
 from common.base_crawler import Crawler
 from collections import deque
 from itertools import product
 import sys
 from dataclasses import dataclass
 
-Response = namedtuple("Response",
-                      ["status", "text"])
 try:
     import uvloop
 
@@ -54,8 +51,8 @@ class SeedSpider(Crawler):
         """
         # ul分四块处理, 风格，唱片类型，国家。
         # 分块处理
-        :param source: 
-        :return: 
+        :param source:
+        :return:
         """
         # keyword = ["Italodance", "House", "Trance"]
         style_dic = dict()
@@ -89,7 +86,7 @@ class SeedSpider(Crawler):
                     type_dic[k].setdefault("name", deque()).append(name)
                     type_dic[k].setdefault("count", deque()).append(count)
 
-        for item in product([2000, 2001, 2002, 2003], style_dic["url_name"], format_dic["url_name"],
+        for item in product([2000, 2001], style_dic["url_name"], format_dic["url_name"],
                             country_dic["url_name"]):
             data = dict()
             country = item[3]

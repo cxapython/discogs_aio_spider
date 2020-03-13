@@ -20,6 +20,7 @@ from copy import deepcopy
 from contextvars import ContextVar
 from contextlib import asynccontextmanager
 import traceback
+from pydantic import BaseModel
 
 Node = List[str]
 run_flag: ContextVar = ContextVar('which function will run in decorator')
@@ -34,8 +35,7 @@ except ImportError:
     pass
 
 
-@dataclass(frozen=True)
-class Response:
+class Response(BaseModel):
     status: int
     source: str
 
