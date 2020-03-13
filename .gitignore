@@ -2,7 +2,7 @@
 __pycache__/
 *.py[cod]
 *$py.class
-.idea/
+.idea
 # C extensions
 *.so
 
@@ -74,13 +74,11 @@ target/
 
 # pyenv
 .python-version
-.idea/*.xml
 # celery beat schedule file
 celerybeat-schedule
 workspace.xml
 # SageMath parsed files
 *.sage.py
-.idea/workspace.xml
 # Environments
 .env
 .venv
