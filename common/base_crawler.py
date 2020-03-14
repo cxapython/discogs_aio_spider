@@ -3,6 +3,7 @@
 # @Author : cxa
 # @File : base_crawler.py
 # @Software: PyCharm
+# @公众号: Python学习开发
 
 import asyncio
 import aiohttp
@@ -23,8 +24,8 @@ import traceback
 from pydantic import BaseModel
 import hashlib
 import msgpack
-from collections.abc import Mapping
 import aioredis
+from functools import partial
 
 Node = List[str]
 run_flag: ContextVar = ContextVar('which function will run in decorator')
@@ -74,7 +75,6 @@ class HTTPClient:
                           source_type: str = "text",
                           status_code: int = 200) -> Response:
         """
-
         :param url:
         :param _kwargs:
         :param source_type:
@@ -185,12 +185,21 @@ class Crawler:
     async def fetch_start(self, callback: Callable[..., Awaitable],
                           init_rabbit=True, init_mongo=True,
                           queue_name: Optional[str] = None, starts_url=None) -> None:
+        """
+        根据starts_url进行爬虫任务分配
+        :param callback:
+        :param init_rabbit:
+        :param init_mongo:
+        :param queue_name:
+        :param starts_url:
+        :return:
+        """
         try:
             run_flag.set(True)
             await self.init_all(init_rabbit=init_rabbit, init_mongo=init_mongo)
-
             if starts_url is None:
-                await self.rabbitmq_pool.subscribe(queue_name, eval(f"self.{callback.__name__}"))
+                next_func = partial(self.request_seen, queue_name, callback)
+                await self.rabbitmq_pool.subscribe(queue_name, next_func)
             else:
                 res_list = [asyncio.ensure_future(getattr(self, callback.__name__)(url)) for url in starts_url]
                 tasks = asyncio.wait(res_list)
@@ -208,27 +217,52 @@ class Crawler:
         """
         pass
 
-    def request_fingerprint(self, item):
-        if isinstance(item, Mapping):
-            data = msgpack.packb(item)
-        elif isinstance(item, str):
-            data = bytes(item, encoding="utf-8")
+    @staticmethod
+    def request_fingerprint(data: Union[bytes, str]):
+        """
+        结果转为md5
+        :param data:
+        :return:
+        """
+        if isinstance(data, str):
+            data = bytes(data, encoding="utf-8")
         m = hashlib.md5()
         m.update(data)
         return m.hexdigest()
 
-    async def request_seen(self, key, item):
+    async def _request_seen(self, *, key, item, msg):
         """
-
-        :param request:
+        :param key: redis的键
+        :param item:
+        :param msg:
         :return:
         """
         fp = self.request_fingerprint(item)
-        # This returns the number of values added, zero if already exists.
         pool = await self.init_redis()
         added = await pool.sadd(key, fp)
-        return added == 0
+        flag = False
+        if added == 0:
+            await msg.ack()
+        else:
+            flag = True
+        await self.redis_client.destroy_redis_pool()
+        return flag
 
+    async def request_seen(self, key_name, callback, msg):
+        """
+
+        :param key_name: redis的key
+        :param callback: 要执行的函数
+        :param msg: msg
+        :return:
+        """
+        message = msg.body
+        item = msgpack.unpackb(msg.body, raw=False)
+        result = await self._request_seen(key=key_name, item=message, msg=msg)
+        if result:
+            await getattr(self, callback.__name__)(item, msg)
+
+    @staticmethod
     def start(init_mongo: bool = True,
               init_rabbit: bool = True,
               queue_name: str = None,

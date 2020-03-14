@@ -44,18 +44,14 @@ class IndexSpider(Crawler):
     page_pat: str = "&page=.*&"
 
     @Crawler.start(queue_name=QUEUE_NAME)
-    async def fetch_index_page(self, msg) -> None:
+    async def fetch_index_page(self, _item, msg) -> None:
         """
         访问列表，并开始解析
         :param msg:
+        :param _item:
         :return:
         """
-        item = msgpack.unpackb(msg.body, raw=False)
-        result = await self.request_seen(QUEUE_NAME, item)
-        if result:
-            await self.redis_client.destroy_redis_pool()
-            await msg.ack()
-            return
+        item = _item
         country = item["country"]
         _format = item["format"]
         year = item["year"]

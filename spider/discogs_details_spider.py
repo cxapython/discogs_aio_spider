@@ -17,7 +17,7 @@ import sys
 from multidict import CIMultiDict
 from itertools import islice
 from util import decorator, MotorOperation
-import msgpack
+from typing import Dict
 from urllib.parse import urljoin
 from dataclasses import dataclass
 
@@ -29,19 +29,20 @@ DEFAULT_HEADERS = CIMultiDict({
     "User-Agent": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_2) "
                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/72.0.3626.121 Safari/537.36"),
 })
+QUEUE_NAME = "discogs_index_spider"
 
 
 @dataclass
 class DetailsSpider(Crawler):
-
-    @Crawler.start(queue_name="discogs_index_spider")
-    async def fetch_detail_page(self, msg: str):
+    @Crawler.start(queue_name=QUEUE_NAME)
+    async def fetch_detail_page(self, _item: Dict[str, str], msg: str):
         """
         访问详情页，开始解析
+         :param _item:反序列化之后的数据
         :param msg:队列消息，包括info和body
         :return:
         """
-        url = msgpack.unpackb(msg.body, raw=False).get("url")
+        url = _item.get("url")
         kwargs = {"headers": DEFAULT_HEADERS}
         async with self.http_client() as client:
             detail_url = urljoin(self.spider_config["BASE_URL"], url)
@@ -163,3 +164,15 @@ class DetailsSpider(Crawler):
         tasks = [asyncio.ensure_future(self.get_image_buff(url)) for url in image_node_list]
         await tasks
 
+
+if __name__ == '__main__':
+    python_version = sys.version_info
+    s = DetailsSpider()
+    if python_version >= (3, 7):
+        asyncio.run(s.fetch_detail_page())
+    else:
+        loop = asyncio.get_event_loop()
+        try:
+            loop.run_until_complete(s.fetch_detail_page())
+        finally:
+            loop.close()

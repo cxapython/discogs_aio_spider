@@ -9,8 +9,8 @@ from config import RabbitmqConfig
 import msgpack
 from collections.abc import Mapping
 import asyncio
-
-
+QUEUE_NAME = "discogs_seed_spider"
+results=[]
 async def init():
     """
     :return:
@@ -30,8 +30,12 @@ async def init():
 
 async def callback(msg):
     item = msgpack.unpackb(msg.body, raw=False)
-    print(item)
-    # await msg.ack()
+    if item not in results:
+        print("添加",item)
+        results.append(item)
+    else:
+        print("已经存在",item)
+    #await msg.ack()
 
 
 async def test_publish():
@@ -43,13 +47,13 @@ async def test_publish():
         data["year"] = 2001
         data["style"] = "dance"
         data["page"] = 1
-        await rabbitmq_pool.publish("discogs_seed_spider", data)
+        await rabbitmq_pool.publish(QUEUE_NAME, data)
 
 
 async def test_subscribe():
     rabbitmq_pool = await init()
-    await rabbitmq_pool.subscribe("discogs_seed_spider", callback)
+    await rabbitmq_pool.subscribe(QUEUE_NAME, callback)
 
 
 if __name__ == '__main__':
-    asyncio.run(test_publish())
+    asyncio.run(test_subscribe())

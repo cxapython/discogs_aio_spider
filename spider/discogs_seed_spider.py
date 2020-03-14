@@ -19,9 +19,6 @@ except ImportError:
     pass
 START_URL_LIST = [f"https://www.discogs.com/search/?limit=25&layout=sm&decade=2000&year={i}&page=1"
                   for i in range(2000, 2001)]
-# 最终形式
-BASE_URL = ("https://www.discogs.com/search/?layout=sm&country_exact=UK&format_exact=Vinyl&limit=100&year=2000&"
-            "style_exact=House&page=2&decade=2000")
 DEFAULT_HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
     "Accept-Encoding": "gzip, deflate, br",
@@ -54,7 +51,6 @@ class SeedSpider(Crawler):
         :param source:
         :return:
         """
-        # keyword = ["Italodance", "House", "Trance"]
         style_dic = dict()
         format_dic = dict()
         country_dic = dict()
@@ -70,9 +66,6 @@ class SeedSpider(Crawler):
                 _type = self.xpath(item, "@href")[0]
                 name = self.xpath(item, ".//span[@class='facet_name']", "text")[0].strip("\n").strip()
                 url_name = name.replace(" ", "+")
-                # r = v.split("facets_")[1]
-                # pat = re.compile(f"{r}=(.*?)&")
-                # url_name = pat.findall(_type)[0]
                 if k == "style":
                     if (
                             "ITALO" in name.upper() or "DANCE" in name.upper() or "HOUSE" in name.upper() or "TECHNO" in name.upper()
