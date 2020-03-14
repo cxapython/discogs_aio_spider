@@ -10,6 +10,8 @@ from collections import deque
 from itertools import product
 import sys
 from dataclasses import dataclass
+from itertools import islice
+import time
 
 try:
     import uvloop
@@ -43,6 +45,28 @@ class SeedSpider(Crawler):
             if response.status == 200:
                 source = response.source
                 await self.parse(source)
+
+    @staticmethod
+    def create_url_gen(*, style_dic=None, format_dic=None, country_dic=None):
+        if style_dic is None:
+            style_dic = dict()
+        if format_dic is None:
+            format_dic = dict()
+        if country_dic is None:
+            country_dic = dict()
+        for item in product([2000, 2001], style_dic["url_name"], format_dic["url_name"],
+                            country_dic["url_name"]):
+            data = dict()
+            country = item[3]
+            _format = item[2]
+            year = item[0]
+            style = item[1]
+            data["country"] = country
+            data["format"] = _format
+            data["year"] = year
+            data["style"] = style
+            data["page"] = 1
+            yield data
 
     async def parse(self, source: str):
         """
@@ -78,23 +102,16 @@ class SeedSpider(Crawler):
                     type_dic[k].setdefault("url_name", deque()).append(url_name)
                     type_dic[k].setdefault("name", deque()).append(name)
                     type_dic[k].setdefault("count", deque()).append(count)
+        url_gen = self.create_url_gen(style_dic=style_dic,
+                                      format_dic=format_dic,
+                                      country_dic=country_dic)
 
-        for item in product([2000, 2001], style_dic["url_name"], format_dic["url_name"],
-                            country_dic["url_name"]):
-            data = dict()
-            country = item[3]
-            _format = item[2]
-            year = item[0]
-            style = item[1]
-            data["country"] = country
-            data["format"] = _format
-            data["year"] = year
-            data["style"] = style
-            data["page"] = 1
+        for data in url_gen:
             await self.rabbitmq_pool.publish("discogs_seed_spider", data)
+            await asyncio.sleep(0.01)
 
 
-if __name__ == '__main__':
+def start_seed():
     python_version = sys.version_info
     s = SeedSpider()
     if python_version >= (3, 7):
@@ -105,3 +122,7 @@ if __name__ == '__main__':
             loop.run_until_complete(s.fetch_home())
         finally:
             loop.close()
+
+
+if __name__ == '__main__':
+    start_seed()
