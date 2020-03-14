@@ -6,11 +6,30 @@
 
 from spider import step1, step2, step3
 import asyncio
+import threading
+import time
+from loguru import logger
+from multiprocessing import Process
 
 
-async def main():
-    await step1()
+def get_loop(loop):
+    asyncio.set_event_loop(loop)
+    loop.run_forever()
+
+
+def start():
+
+    loop = asyncio.new_event_loop()
+    t = threading.Thread(target=get_loop, args=(loop,))
+    p = Process(target=step1)
+    p.start()
+    t.start()
+    time.sleep(30)
+    asyncio.run_coroutine_threadsafe(step2(), loop)
+    time.sleep(5)
+    logger.info("start step3")
+    asyncio.run_coroutine_threadsafe(step3(), loop)
 
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    start()
