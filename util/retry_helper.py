@@ -28,7 +28,7 @@ def aio_retry(**kwargs):
         @wraps(func)
         async def decorator(*args, **_kwargs):
             retry_count = 1
-            sleep_time = 1
+            sleep_time = 0.01
             error_info = ""
             while True:
                 if retry_count > attempts:

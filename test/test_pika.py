@@ -3,14 +3,40 @@
 # @作者 : 陈祥安
 # @文件名 : test_pika.py
 # @公众号: Python学习开发
-import pytest
+import aiohttp
 from util import RabbitMqPool
 from config import RabbitmqConfig
 import msgpack
-from collections.abc import Mapping
 import asyncio
-QUEUE_NAME = "discogs_seed_spider"
-results=[]
+from common.base_crawler import Crawler
+from dataclasses import dataclass
+
+DEFAULT_HEADERS = {
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Accept-Language": "zh-CN,zh;q=0.9",
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/79.0.3945.130 Safari/537.36",
+}
+QUEUE_NAME = "test_seed"
+results = []
+
+@dataclass
+class Sipder(Crawler):
+    async def fetch_home(self, url: str):
+        """
+        访问主页，并开始解析
+        :param url:
+        :return:
+        """
+        kwargs = {"headers": DEFAULT_HEADERS}
+        async with self.http_client() as client:
+            response = await client.get_session(url, _kwargs=kwargs)
+            if response.status == 200:
+                source = response.source
+                print(source)
+
+
+
 async def init():
     """
     :return:
@@ -30,12 +56,12 @@ async def init():
 
 async def callback(msg):
     item = msgpack.unpackb(msg.body, raw=False)
-    if item not in results:
-        print("添加",item)
-        results.append(item)
-    else:
-        print("已经存在",item)
-    #await msg.ack()
+    seed_id = item["id"]
+    seed_value = item["value"]
+    url = f"http://192.168.3.7:5000/index/?item_id={seed_id}&v={seed_value}"
+    await Sipder().fetch_home(url)
+
+    # await msg.ack()
 
 
 async def test_publish():
