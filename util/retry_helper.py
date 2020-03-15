@@ -28,7 +28,6 @@ def aio_retry(**kwargs):
         @wraps(func)
         async def decorator(*args, **_kwargs):
             retry_count = 1
-            sleep_time = 0.01
             error_info = ""
             while True:
                 if retry_count > attempts:
@@ -47,7 +46,7 @@ def aio_retry(**kwargs):
                     retry_count += 1
                     if max_sleep_time:
                         sleep_time = random.randint(min_sleep_time, max_sleep_time)
-                    await asyncio.sleep(sleep_time)
+                        await asyncio.sleep(sleep_time)
 
         return decorator
 
