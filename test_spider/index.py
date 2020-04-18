@@ -59,8 +59,7 @@ class IndexSpider(Crawler):
                 # 获取当前的链接然后构建所有页数的url。
                 # 保存当一页的内容。
                 await self.get_list_info(url, source)
-                # 成功完成任务
-                await msg.ack()
+                #await msg.ack()
 
     async def get_list_info(self, url: str, source: str):
         """
