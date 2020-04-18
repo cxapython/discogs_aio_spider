@@ -72,7 +72,7 @@ async def test_publish():
         data["format"] = "cd"
         data["year"] = 2001
         data["style"] = "dance"
-        data["page"] = 1
+        data["page"] = i
         await rabbitmq_pool.publish(QUEUE_NAME, data)
 
 
@@ -82,4 +82,4 @@ async def test_subscribe():
 
 
 if __name__ == '__main__':
-    asyncio.run(test_subscribe())
+    asyncio.run(test_publish())
