@@ -6,26 +6,30 @@
 # @公众号: Python学习开发
 
 import asyncio
-import aiohttp
-from loguru import logger as crawler
-import async_timeout
-from util import aio_retry
-from lxml import html
-from util import RabbitMqPool, MongoPool, RedisPool
-from config import MongoConfig, RabbitmqConfig, SpiderConfig, RedisConfig
-from functools import wraps
-from dataclasses import dataclass
-from typing import Optional, Dict, Any, Union, List, Callable, Type, AsyncIterator, Awaitable
-from types import TracebackType
-from copy import deepcopy
-from contextvars import ContextVar
-from contextlib import asynccontextmanager
-import traceback
-from pydantic import BaseModel
 import hashlib
-import msgpack
-import aioredis
+import logging
+import traceback
+from contextlib import asynccontextmanager
+from contextvars import ContextVar
+from copy import deepcopy
+from dataclasses import dataclass
 from functools import partial
+from functools import wraps
+from types import TracebackType
+from typing import Optional, Dict, Any, Union, List, Callable, Type, AsyncIterator, Awaitable
+
+import aioredis
+import httpx
+import msgpack
+from loguru import logger as crawler
+from lxml import html
+from pydantic import BaseModel
+
+from config import MongoConfig, RabbitmqConfig, SpiderConfig, RedisConfig
+from util import RabbitMqPool, MongoPool, RedisPool
+from util import aio_retry
+
+asyncio.log.logger.setLevel(logging.ERROR)
 
 Node = List[str]
 run_flag: ContextVar = ContextVar('which function will run in decorator')
@@ -49,16 +53,17 @@ class Response(BaseModel):
 class HTTPClient:
     def __post_init__(self):
         self.spider_config = SpiderConfig
-
-        self.tc = aiohttp.connector.TCPConnector(limit=300, force_close=True,
-                                                 enable_cleanup_closed=True,
-                                                 ssl=False)
-
-        self.session = aiohttp.ClientSession(connector=self.tc)
+        proxies = {
+            "all://": None,
+        }
+        if self.spider_config.get("USE_PROXY"):
+            from config.proxy_config import PROXY_SERVER
+            proxies = PROXY_SERVER
+        self.session = httpx.AsyncClient(proxies=proxies)
 
     async def close(self):
         crawler.info("close session")
-        return await asyncio.gather(self.tc.close(), self.session.close())
+        return await self.session.aclose()
 
     async def __aenter__(self) -> "HTTPClient":
         return self
@@ -84,19 +89,14 @@ class HTTPClient:
         if _kwargs is None:
             _kwargs = dict()
         kwargs = deepcopy(_kwargs)
-        if self.spider_config.get("USE_PROXY"):
-            kwargs["proxy"] = await self.get_proxy()
         method = kwargs.pop("method", "get")
-        timeout = kwargs.pop("timeout", 5)
-        with async_timeout.timeout(timeout):
-            async with getattr(self.session, method)(url, **kwargs) as req:
-                status = req.status
-                if status in [status_code, 201]:
-                    if source_type == "text":
-                        source = await req.text()
-                    elif source_type == "buff":
-                        source = await req.read()
-
+        req = await getattr(self.session, method)(url, **kwargs)
+        status = req.status_code
+        if status in [status_code, 201]:
+            if source_type == "text":
+                source = req.text
+            elif source_type == "buff":
+                source = req.read
         crawler.info(f"get url:{url},status:{status}")
         res = Response(status=status, source=source)
         return res
@@ -209,13 +209,6 @@ class Crawler:
             crawler.error("asyncio cancelle or timeout error")
         except Exception as e:
             crawler.error(f"else error:{traceback.format_exc()}")
-
-    async def get_proxy(self):
-        """
-        代理部分
-        :return:
-        """
-        pass
 
     @staticmethod
     def request_fingerprint(data: Union[bytes, str]):

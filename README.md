@@ -1,6 +1,6 @@
 
-# 基于Asyncio+Aiohttp+Motor+Aio-Pika+Aioredis的国外黑胶唱片信息网站Discogs内容的抓取。
-# 使用版本Python3.8
+#Based on Asyncio+Httpx+Motor+Aio-Pika+Aioredis  foreign vinyl record information website Discogs  crawling.
+# Python3.8
 
 ![项目流程图](discogs项目流程图.jpg)
 

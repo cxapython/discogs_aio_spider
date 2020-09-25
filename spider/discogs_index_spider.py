@@ -5,19 +5,17 @@
 # @Software: PyCharm
 # 2000-2009
 import asyncio
-
-import msgpack
-
-from util import MotorOperation
-from loguru import logger as crawler
 import datetime
-from common.base_crawler import Crawler
-import re
 import math
-from multidict import CIMultiDict
-from urllib.parse import urljoin
+import re
 import sys
 from dataclasses import dataclass
+from urllib.parse import urljoin
+
+from loguru import logger as crawler
+
+from common.base_crawler import Crawler
+from util import MotorOperation
 
 try:
     import uvloop
@@ -27,14 +25,14 @@ except ImportError:
     pass
 BASE_URL = "https://www.discogs.com"
 # 最终形式
-DEFAULT_HEADERS = CIMultiDict({
+DEFAULT_HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
     "Accept-Encoding": "gzip, deflate, br",
     "Accept-Language": "zh-CN,zh;q=0.9",
     "Host": "www.discogs.com",
     "User-Agent": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_2) "
                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/72.0.3626.121 Safari/537.36"),
-})
+}
 
 QUEUE_NAME = "discogs_seed_spider"
 
@@ -58,6 +56,7 @@ class IndexSpider(Crawler):
         style = item["style"]
         url = (f"https://www.discogs.com/search/?layout=sm&country_exact={country}&"
                f"format_exact={_format}&limit=100&year={year}&style_exact={style}&page=1&decade=2000")
+        # header type must dict,can't use else mapping type,like "CIMultiDict".
         kwargs = {"headers": DEFAULT_HEADERS, "timeout": 15}
         # 修改种子URL的状态为1表示开始爬取。
         async with self.http_client() as client:

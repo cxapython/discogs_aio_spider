@@ -11,9 +11,9 @@
     max_pool_size=20
     min_pool_size=5
 [spider]
-    CONCURRENCY_NUM = 5
+    CONCURRENCY_NUM = 10
     MAX_RETRY_TIMES = 3
-    USE_PROXY = false
+    USE_PROXY = true
     SAVE_IMG_BASE64 = false
     SAVE_IMG_FILE = false
     BASE_URL = "https://www.discogs.com"

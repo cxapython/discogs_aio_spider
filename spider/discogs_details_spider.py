@@ -4,31 +4,32 @@
 # @File : discogs_details_spider.py
 # @Software: PyCharm
 import asyncio
-from util import aio_retry
+import base64
+import datetime
+import os
+import sys
+from copy import copy
+from dataclasses import dataclass
+from itertools import islice
+from typing import Dict
+from urllib.parse import urljoin
+
 import aiofiles
 from loguru import logger as  crawler
 from loguru import logger as  storage
-import datetime
-import base64
-from copy import copy
-import os
-from common.base_crawler import Crawler
-import sys
-from multidict import CIMultiDict
-from itertools import islice
-from util import decorator, MotorOperation
-from typing import Dict
-from urllib.parse import urljoin
-from dataclasses import dataclass
 
-DEFAULT_HEADERS = CIMultiDict({
+from common.base_crawler import Crawler
+from util import aio_retry
+from util import decorator, MotorOperation
+
+DEFAULT_HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
     "Accept-Encoding": "gzip, deflate, br",
     "Accept-Language": "zh-CN,zh;q=0.9",
     "Host": "www.discogs.com",
     "User-Agent": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_2) "
                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/72.0.3626.121 Safari/537.36"),
-})
+}
 QUEUE_NAME = "discogs_index_spider"
 
 
