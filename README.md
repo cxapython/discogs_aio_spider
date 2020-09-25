@@ -4,12 +4,20 @@
 
 ![项目流程图](discogs项目流程图.jpg)
 
-### 安装依赖
+### install poetry
 ```
-pip install -r requirements.txt
+curl -sSL https://raw.githubusercontent.com/sdispater/poetry/master/get-poetry.py | python3
 ```
-### 如何运行
-点击```main.py```运行即可。
+### install dependencies
+```
+portry install 
+```
+
+### run
+```
+portry run python main.py
+```
+
 注意事项如下:
 step1要先生成任务队列，否则step2出错。同理step3要等step2生成任务队列。
 可以根据实际业务情况，优化文件之间的调用。（其中step1、step2、step3是函数的别名）
