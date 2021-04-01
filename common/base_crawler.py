@@ -96,7 +96,7 @@ class HTTPClient:
             if source_type == "text":
                 source = req.text
             elif source_type == "buff":
-                source = req.read
+                source = req.content
         crawler.info(f"get url:{url},status:{status}")
         res = Response(status=status, source=source)
         return res
