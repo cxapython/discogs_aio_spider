@@ -6,6 +6,7 @@
 # 2000-2009
 import asyncio
 import sys
+import traceback
 
 sys.path.append("..")
 from util import MotorOperation
@@ -103,8 +104,8 @@ class IndexSpider(Crawler):
                     self.xpath(div_node, f"{card_info_xpath}/span[@class='card_release_catalog_number']", "text")[0]
                 dic["format"] = self.xpath(div_node, f"{card_info_xpath}/span[@class='card_release_format']", "text")[0]
                 dic["year"] = self.xpath(div_node, f"{card_info_xpath}/span[@class='card_release_year']", "text")[0]
-                dic["country"] = self.xpath(div_node, f"{card_info_xpath}/span[@class='card_release_country']", "text")[
-                    0]
+                country_arr = self.xpath(div_node, f"{card_info_xpath}/span[@class='card_release_country']", "text")
+                dic["country"] = country_arr[0] if country_arr else "UnKnow"
                 dic["url"] = url
                 dic["page_index"] = 1
                 dic["crawler_time"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -118,7 +119,7 @@ class IndexSpider(Crawler):
 
             except IndexError as e:
                 # https://www.discogs.com/search/?layout=sm&country_exact=Unknown&format_exact=Cassette&limit=100&year=2000&style_exact=House&page=1&decade=2000
-                crawler.error(f"Parsing error, the url at this time is:{url=}")
+                crawler.error(f"Parsing error, the url at this time is:{url=},detail:{traceback.format_exc()}")
         if task:
             have_more = True
             await MotorOperation().save_data(self.mongo_pool, task)
