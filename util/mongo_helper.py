@@ -72,7 +72,7 @@ class MotorOperation:
                     {'$set': items},
                     upsert=True)
             except Exception as e:
-                storage.error(f"Error when inserting data:{e.args},The item at this time is:{item}")
+                storage.error(f"Error when inserting data:{e.args},The item at this time is:{items}")
 
     async def find_data(self, pool, col="discogs_details_data"):
         mb = pool()[self.db_name]
