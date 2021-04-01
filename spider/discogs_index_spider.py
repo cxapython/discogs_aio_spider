@@ -99,13 +99,18 @@ class IndexSpider(Crawler):
                 dic["detail_url"] = urljoin(BASE_URL, _detail_url)
 
                 card_info_xpath = ".//div[@class='card_body']/p[@class='card_info']"
-                dic["label"] = self.xpath(div_node, f"{card_info_xpath}/a", "text")[0]
-                dic["catalog_number"] = \
-                    self.xpath(div_node, f"{card_info_xpath}/span[@class='card_release_catalog_number']", "text")[0]
-                dic["format"] = self.xpath(div_node, f"{card_info_xpath}/span[@class='card_release_format']", "text")[0]
-                dic["year"] = self.xpath(div_node, f"{card_info_xpath}/span[@class='card_release_year']", "text")[0]
+
+                label_arr = self.xpath(div_node, f"{card_info_xpath}/a", "text")
+                catalog_number_arr = self.xpath(div_node,
+                                                f"{card_info_xpath}/span[@class='card_release_catalog_number']", "text")
+                format_arr = self.xpath(div_node, f"{card_info_xpath}/span[@class='card_release_format']", "text")
+                year_arr = self.xpath(div_node, f"{card_info_xpath}/span[@class='card_release_year']", "text")
                 country_arr = self.xpath(div_node, f"{card_info_xpath}/span[@class='card_release_country']", "text")
-                dic["country"] = country_arr[0] if country_arr else "UnKnow"
+                dic["label"] = label_arr[0] if label_arr else "Unknown"
+                dic["catalog_number"] = catalog_number_arr[0] if catalog_number_arr else "Unknown"
+                dic["format"] = format_arr[0] if format_arr else "Unknown"
+                dic["year"] = year_arr[0] if year_arr else "Unknown"
+                dic["country"] = country_arr[0] if country_arr else "Unknown"
                 dic["url"] = url
                 dic["page_index"] = 1
                 dic["crawler_time"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
