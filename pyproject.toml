@@ -6,7 +6,7 @@ authors = ["cxapython <1598828268@qq.com>"]
 
 [tool.poetry.dependencies]
 python = "^3.8"
-httpx = "^0.15.4"
+httpx = "^0.23.0"
 aioredis = "^1.3.1"
 pydantic = "^1.6.1"
 msgpack = "^1.0.0"
