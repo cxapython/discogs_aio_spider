@@ -23,7 +23,6 @@ def aio_retry(**kwargs):
     max_sleep_time: int = kwargs.pop("max", None)
     min_sleep_time: int = kwargs.pop("min", 0)
     attempts: int = kwargs.pop("attempts", 3)
-    error: bool = kwargs.pop("error", False)
 
     def retry(func):
         @wraps(func)
@@ -32,7 +31,7 @@ def aio_retry(**kwargs):
             error_info = ""
             while True:
                 if retry_count > attempts:
-                    if error:
+                    if error_info:
                         raise RetryTimeout("Too many errors")
                     else:
                         logger.error(f"After retries {retry_count} times, an error occurred.here is detail{error_info}")
@@ -44,10 +43,11 @@ def aio_retry(**kwargs):
                     if retry_count == attempts:
                         error_info = f"{traceback.format_exc()}"
                     else:
-                        retry_count += 1
                         if max_sleep_time:
                             sleep_time = random.randint(min_sleep_time, max_sleep_time)
                             await asyncio.sleep(sleep_time)
+                    retry_count += 1
+        
 
         return decorator
 
